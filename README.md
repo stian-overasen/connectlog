@@ -169,7 +169,7 @@ This API provides comprehensive data for analyzing Post-Exertional Malaise (PEM)
 
 ## Project Structure
 
-```            # Flask API with data fetchers and endpoints
+```# Flask API with data fetchers and endpoints
 ├── setup_oauth.py                  # OAuth authentication script
 ├── pyproject.toml                  # uv project configuration and dependencies
 ├── .env.example                    # Environment variable template
@@ -191,8 +191,9 @@ Managed via [pyproject.toml](pyproject.toml) and uv package manager:
 - **python-dotenv** - Environment variable management
 - **tqdm** - Progress bars for data fetching
 
-To add dependencies, edit `dependencies` array in [pyproject.toml](pyproject.toml) and run `uv sync`. └── data.db         # SQLite database (auto-generated)
-└── README.md           # This file
+To add dependencies, edit `dependencies` array in [pyproject.toml](pyproject.toml) and run `uv sync`. └── data.db # SQLite database (auto-generated)
+└── README.md # This file
+
 ```
 
 ## Troubleshooting
@@ -219,3 +220,4 @@ MIT License - See repository for details
 ## Contributing
 
 This is a research tool for personal use. Issues and pull requests welcome for bug fixes and data accuracy improvements.
+```

@@ -4,15 +4,15 @@ Garmin Connect Log API
 Flask app to fetch and analyze Garmin Connect health data for ME/CFS PEM threshold research
 """
 
+import json
 import os
 import sqlite3
-import json
 from datetime import datetime, timedelta
+
+from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from garminconnect import Garmin
-from dotenv import load_dotenv
 from tqdm import tqdm
-
 
 # Load environment variables
 load_dotenv()
@@ -403,7 +403,7 @@ def api_summary():
             for activity in activities:
                 save_activity(activity)
 
-            print(f"✓ Data fetched and cached")
+            print("✓ Data fetched and cached")
 
         except Exception as e:
             print(f"Error fetching data from Garmin: {e}")

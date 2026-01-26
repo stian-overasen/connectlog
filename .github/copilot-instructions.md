@@ -16,6 +16,7 @@ This is a Flask API that fetches Garmin Connect health data for ME/CFS (Myalgic 
 ## Code Style & Standards
 
 ### Python Standards
+
 - Line length: 160 characters (configured in pyproject.toml)
 - Follow ruff linting rules (E, W, F, I, B, C4, UP)
 - Use type hints where appropriate
@@ -23,11 +24,13 @@ This is a Flask API that fetches Garmin Connect health data for ME/CFS (Myalgic 
 - Use f-strings for string formatting
 
 ### Formatting
+
 - Auto-formatted with ruff
 - Import sorting with isort (via ruff)
 - Run `uv run ruff format .` before commits
 
 ### Commands
+
 - **Install dependencies**: `uv sync` (NOT `pip install`)
 - **Run scripts**: `uv run <script.py>` (NOT `python <script.py>`)
 - **Add dependencies**: Edit `pyproject.toml` dependencies array, then `uv sync`
@@ -49,6 +52,7 @@ connectlog/
 ## Key Implementation Details
 
 ### Authentication
+
 - Uses Garmin Connect OAuth via `garminconnect` library
 - Session token stored in `.env` file (valid ~1 year)
 - Run `uv run setup_oauth.py` to generate token
@@ -57,18 +61,21 @@ connectlog/
 ### Database Schema
 
 **daily_summaries table:**
+
 - date (PRIMARY KEY)
 - resting_hr, max_hr, hrv
 - body_battery_hourly (JSON array text)
 - steps, sleep_duration, sleep_score
 
 **activities table:**
+
 - activity_id (PRIMARY KEY)
 - date, activity_type, duration, distance
 - hr_zones (JSON array text)
 - bb_impact (body battery impact)
 
 ### Data Fetching Strategy
+
 - Configurable date range via `?months=3` parameter
 - Check database for existing data before API calls
 - Fetch only missing dates to minimize API usage
@@ -77,6 +84,7 @@ connectlog/
 - Skip individual dates/activities on errors (partial data OK)
 
 ### Garmin API Endpoints Used
+
 - `client.get_stats(date)` - Daily resting/max HR, steps
 - `client.get_hrv_data(date)` - Heart rate variability
 - `client.get_body_battery(start, end)` - Hourly body battery values
@@ -85,6 +93,7 @@ connectlog/
 - `client.get_activity(id)` - Detailed activity with HR zones
 
 ### Error Handling
+
 - Wrap all API calls in try-except blocks
 - Skip individual failures, continue processing
 - Return partial data when some requests fail
@@ -104,6 +113,7 @@ This tool helps patients identify safe exertion thresholds by analyzing:
 ## Common Tasks
 
 ### Adding a New Dependency
+
 ```bash
 # Edit pyproject.toml dependencies array
 "new-package>=1.0.0",
@@ -113,6 +123,7 @@ uv sync
 ```
 
 ### Adding a New API Endpoint
+
 ```python
 @app.route("/api/new-endpoint")
 def new_endpoint():
@@ -122,6 +133,7 @@ def new_endpoint():
 ```
 
 ### Fetching New Garmin Data Type
+
 ```python
 def fetch_new_metric(client, date_str):
     """Fetch new health metric from Garmin."""
