@@ -21,21 +21,26 @@
 ### Installation
 
 1. **Clone the repository**
+
    ```bash
    git clone https://github.com/stian-overasen/connectlog.git
    cd connectlog
    ```
 
 2. **Install dependencies with uv**
+
    ```bash
    uv sync
    ```
 
+   This creates a virtual environment and installs all dependencies from [pyproject.toml](pyproject.toml).
+
 3. **Set up Garmin Connect authentication**
+
    ```bash
    uv run setup_oauth.py
    ```
-   
+
    Enter your Garmin Connect email and password when prompted. This generates a session token saved to `.env` (valid for ~1 year).
 
 ## Usage
@@ -48,19 +53,24 @@ uv run app.py
 
 The API runs on `http://127.0.0.1:5000`
 
+On first run, the API will fetch data from Garmin Connect with progress indicators. Subsequent runs use cached data from the SQLite database.
+
 ### Fetch Data
 
 **Get last 3 months (default)**
+
 ```bash
 curl http://127.0.0.1:5000/api/summary
 ```
 
 **Get last 6 months**
+
 ```bash
 curl http://127.0.0.1:5000/api/summary?months=6
 ```
 
 **Refresh data**
+
 ```bash
 rm cache/data.db
 curl http://127.0.0.1:5000/api/summary
@@ -79,13 +89,13 @@ curl http://127.0.0.1:5000/api/summary
       "max_hr": 160,
       "hrv": 45,
       "body_battery_hourly": [
-        {"hour": 0, "value": 85},
-        {"hour": 1, "value": 88},
-        {"hour": 2, "value": 92},
-        {"hour": 6, "value": 100},
-        {"hour": 12, "value": 75},
-        {"hour": 18, "value": 45},
-        {"hour": 23, "value": 34}
+        { "hour": 0, "value": 85 },
+        { "hour": 1, "value": 88 },
+        { "hour": 2, "value": 92 },
+        { "hour": 6, "value": 100 },
+        { "hour": 12, "value": 75 },
+        { "hour": 18, "value": 45 },
+        { "hour": 23, "value": 34 }
       ],
       "steps": 8500,
       "sleep_duration": 26400,
@@ -100,11 +110,11 @@ curl http://127.0.0.1:5000/api/summary
       "duration": 3600,
       "distance": 10000.0,
       "hr_zones": [
-        {"zone": 1, "time_seconds": 300},
-        {"zone": 2, "time_seconds": 1200},
-        {"zone": 3, "time_seconds": 1500},
-        {"zone": 4, "time_seconds": 600},
-        {"zone": 5, "time_seconds": 0}
+        { "zone": 1, "time_seconds": 300 },
+        { "zone": 2, "time_seconds": 1200 },
+        { "zone": 3, "time_seconds": 1500 },
+        { "zone": 4, "time_seconds": 600 },
+        { "zone": 5, "time_seconds": 0 }
       ],
       "bb_impact": -28
     }
@@ -159,23 +169,36 @@ This API provides comprehensive data for analyzing Post-Exertional Malaise (PEM)
 
 ## Project Structure
 
-```
-connectlog/
-├── app.py              # Flask API with data fetchers and endpoints
-├── setup_oauth.py      # OAuth authentication script
-├── requirements.txt    # Python dependencies
-├── .env.example        # Environment variable template
-├── .env                # OAuth session token (generated, gitignored)
-├── .gitignore          # Excludes .env and cache/
+```            # Flask API with data fetchers and endpoints
+├── setup_oauth.py                  # OAuth authentication script
+├── pyproject.toml                  # uv project configuration and dependencies
+├── .env.example                    # Environment variable template
+├── .env                            # OAuth session token (generated, gitignored)
+├── .gitignore                      # Excludes .env and cache/
+├── .github/
+│   └── copilot-instructions.md     # GitHub Copilot project context
 ├── cache/
-│   └── data.db         # SQLite database (auto-generated)
+│   └── data.db                     # SQLite database (auto-generated)
+└── README.md                       # This file
+```
+
+## Dependencies
+
+Managed via [pyproject.toml](pyproject.toml) and uv package manager:
+
+- **flask** - Web framework
+- **garminconnect** - Garmin Connect API client
+- **python-dotenv** - Environment variable management
+- **tqdm** - Progress bars for data fetching
+
+To add dependencies, edit `dependencies` array in [pyproject.toml](pyproject.toml) and run `uv sync`. └── data.db         # SQLite database (auto-generated)
 └── README.md           # This file
 ```
 
 ## Troubleshooting
 
 **"GARMIN_SESSION not found" error**
-- Run `python setup_oauth.py` to generate authentication token
+- Run `uv run setup_oauth.py` to generate authentication token
 
 **No data returned**
 - Check Garmin Connect credentials
@@ -187,7 +210,7 @@ connectlog/
 
 **Authentication expired**
 - OAuth tokens expire after ~1 year
-- Run `python setup_oauth.py` again to regenerate
+- Run `uv run setup_oauth.py` again to regenerate
 
 ## License
 

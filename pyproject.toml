@@ -8,6 +8,7 @@ dependencies = [
     "flask",
     "garminconnect",
     "python-dotenv",
+    "tqdm",
 ]
 
 [dependency-groups]
