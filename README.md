@@ -28,12 +28,12 @@
 
 2. **Install dependencies with uv**
    ```bash
-   uv pip install -r requirements.txt
+   uv sync
    ```
 
 3. **Set up Garmin Connect authentication**
    ```bash
-   python setup_oauth.py
+   uv run setup_oauth.py
    ```
    
    Enter your Garmin Connect email and password when prompted. This generates a session token saved to `.env` (valid for ~1 year).
@@ -43,7 +43,7 @@
 ### Start the Flask API
 
 ```bash
-python app.py
+uv run app.py
 ```
 
 The API runs on `http://127.0.0.1:5000`
