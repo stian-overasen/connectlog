@@ -18,6 +18,7 @@ from tqdm import tqdm
 load_dotenv()
 
 app = Flask(__name__)
+app.json.sort_keys = False
 
 # Configuration
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
@@ -41,6 +42,8 @@ def init_db():
             max_hr INTEGER,
             hrv REAL,
             body_battery_hourly TEXT,
+            body_battery_min INTEGER,
+            body_battery_max INTEGER,
             steps INTEGER,
             sleep_duration INTEGER,
             sleep_score INTEGER
@@ -50,8 +53,7 @@ def init_db():
     # Activities table
     c.execute("""
         CREATE TABLE IF NOT EXISTS activities (
-            activity_id INTEGER PRIMARY KEY,
-            date TEXT,
+            datetime TEXT PRIMARY KEY,
             activity_type TEXT,
             duration INTEGER,
             distance REAL,
@@ -71,7 +73,43 @@ def get_garmin_client():
 
     client = Garmin()
     client.garth.loads(GARMIN_SESSION)
+
+    # Fetch user profile to set display name (prevents 403 errors)
+    client.display_name = client.get_full_name()
+    profile = client.get_user_profile()
+
+    try:
+        client.display_name = client.get_full_name() or "N/A"
+    except Exception:
+        # Fallback to getting display name from user summary
+        try:
+            profile = client.get_user_profile()
+            client.display_name = profile.get('displayName') or profile.get('userName')
+        except Exception:
+            pass
+
     return client
+
+
+def format_duration(seconds):
+    """Format duration in seconds to human-readable format (HHh MMm SSs)."""
+    if seconds is None:
+        return None
+    seconds = int(seconds)  # Convert to int in case it's a float
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    return f"{hours:01d}h {minutes:02d}m {secs:02d}s"
+
+
+def format_sleep_duration(seconds):
+    """Format sleep duration without leading zero for hours."""
+    if seconds is None:
+        return None
+    seconds = int(seconds)
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    return f"{hours}h {minutes:02d}m"
 
 
 def fetch_daily_summary(client, date_str):
@@ -82,6 +120,8 @@ def fetch_daily_summary(client, date_str):
         "max_hr": None,
         "hrv": None,
         "body_battery_hourly": None,
+        "body_battery_min": None,
+        "body_battery_max": None,
         "steps": None,
         "sleep_duration": None,
         "sleep_score": None,
@@ -101,28 +141,22 @@ def fetch_daily_summary(client, date_str):
         # Get HRV data
         hrv_data = client.get_hrv_data(date_str)
         if hrv_data and "hrvSummary" in hrv_data:
-            summary["hrv"] = hrv_data["hrvSummary"].get("weeklyAvg")
+            summary["hrv"] = hrv_data["hrvSummary"].get("lastNightAvg")
     except Exception as e:
         print(f"  Warning: Failed to get HRV for {date_str}: {e}")
 
     try:
         # Get Body Battery hourly data
-        next_day = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-        bb_data = client.get_body_battery(date_str, next_day)
+        bb_data = client.get_body_battery(date_str)
 
         if bb_data:
-            hourly_values = []
             for entry in bb_data:
-                timestamp = entry.get("startTimestampLocal") or entry.get("startTimestampGMT")
-                if timestamp:
-                    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                    hour = dt.hour
-                    value = entry.get("charged") or entry.get("drained") or entry.get("value")
-                    if value is not None:
-                        hourly_values.append({"hour": hour, "value": value})
+                values = [tup[-1] for tup in entry.get("bodyBatteryValuesArray", [])]
 
-            if hourly_values:
-                summary["body_battery_hourly"] = json.dumps(hourly_values)
+            if values:
+                summary["body_battery_hourly"] = ",".join(map(str, values))
+                summary["body_battery_max"] = max(values)
+                summary["body_battery_min"] = min(values)
     except Exception as e:
         print(f"  Warning: Failed to get Body Battery for {date_str}: {e}")
 
@@ -148,46 +182,34 @@ def fetch_activities(client, start_date, end_date):
         activity_list = client.get_activities_by_date(start_date, end_date)
 
         for activity in activity_list:
-            activity_id = activity.get("activityId")
-            if not activity_id:
-                continue
+            # Extract HR zones from hrTimeInZone fields
+            hr_zones = None
 
-            try:
-                # Get detailed activity data
-                details = client.get_activity(activity_id)
+            zones = []
+            for i in range(5, 0, -1):  # HR zones 5-1 inclusive
+                time_in_zone = activity.get(f"hrTimeInZone_{i}")
+                if time_in_zone is not None:
+                    zones.append({"zone": i, "time_seconds": float(f"{time_in_zone:.2f}")})
 
-                # Extract HR zones
-                hr_zones = None
-                if "heartRateZones" in details:
-                    zones = []
-                    for zone in details["heartRateZones"]:
-                        zones.append({"zone": zone.get("zoneNumber"), "time_seconds": zone.get("secsInZone")})
-                    hr_zones = json.dumps(zones)
+            if zones:
+                hr_zones = zones
 
-                # Extract body battery impact
-                bb_impact = None
-                if "bodyBattery" in details:
-                    bb_data = details["bodyBattery"]
-                    start_val = bb_data.get("startValue")
-                    end_val = bb_data.get("endValue")
-                    if start_val is not None and end_val is not None:
-                        bb_impact = end_val - start_val
+            # Extract body battery impact from differenceBodyBattery
+            bb_impact = activity.get("differenceBodyBattery")
 
-                activities.append(
-                    {
-                        "activity_id": activity_id,
-                        "date": activity.get("startTimeLocal", "").split()[0],
-                        "activity_type": activity.get("activityType", {}).get("typeKey"),
-                        "duration": activity.get("duration"),
-                        "distance": activity.get("distance"),
-                        "hr_zones": hr_zones,
-                        "bb_impact": bb_impact,
-                    }
-                )
+            # Combine date and time into single datetime string
+            start_time_local = activity.get("startTimeLocal", "")
 
-            except Exception as e:
-                print(f"  Warning: Failed to get details for activity {activity_id}: {e}")
-                continue
+            activities.append(
+                {
+                    "datetime": start_time_local,
+                    "activity_type": activity.get("activityType", {}).get("typeKey"),
+                    "duration": activity.get("duration"),
+                    "distance": activity.get("distance"),
+                    "hr_zones": hr_zones,
+                    "bb_impact": bb_impact,
+                }
+            )
 
     except Exception as e:
         print(f"  Warning: Failed to get activities: {e}")
@@ -203,8 +225,8 @@ def save_daily_summary(summary):
     c.execute(
         """
         INSERT OR REPLACE INTO daily_summaries
-        (date, resting_hr, max_hr, hrv, body_battery_hourly, steps, sleep_duration, sleep_score)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (date, resting_hr, max_hr, hrv, body_battery_hourly, body_battery_min, body_battery_max, steps, sleep_duration, sleep_score)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
         (
             summary["date"],
@@ -212,6 +234,8 @@ def save_daily_summary(summary):
             summary["max_hr"],
             summary["hrv"],
             summary["body_battery_hourly"],
+            summary["body_battery_min"],
+            summary["body_battery_max"],
             summary["steps"],
             summary["sleep_duration"],
             summary["sleep_score"],
@@ -230,12 +254,11 @@ def save_activity(activity):
     c.execute(
         """
         INSERT OR REPLACE INTO activities
-        (activity_id, date, activity_type, duration, distance, hr_zones, bb_impact)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (datetime, activity_type, duration, distance, hr_zones, bb_impact)
+        VALUES (?, ?, ?, ?, ?, ?)
     """,
         (
-            activity["activity_id"],
-            activity["date"],
+            activity["datetime"],
             activity["activity_type"],
             activity["duration"],
             activity["distance"],
@@ -255,10 +278,10 @@ def get_daily_summaries_from_db(start_date, end_date):
 
     c.execute(
         """
-        SELECT date, resting_hr, max_hr, hrv, body_battery_hourly, steps, sleep_duration, sleep_score
+        SELECT date, resting_hr, max_hr, hrv, body_battery_hourly, body_battery_min, body_battery_max, steps, sleep_duration, sleep_score
         FROM daily_summaries
         WHERE date >= ? AND date <= ?
-        ORDER BY date
+        ORDER BY date DESC
     """,
         (start_date, end_date),
     )
@@ -273,10 +296,12 @@ def get_daily_summaries_from_db(start_date, end_date):
             "resting_hr": row[1],
             "max_hr": row[2],
             "hrv": row[3],
-            "body_battery_hourly": json.loads(row[4]) if row[4] else None,
-            "steps": row[5],
-            "sleep_duration": row[6],
-            "sleep_score": row[7],
+            "body_battery_hourly": row[4],
+            "body_battery_min": row[5],
+            "body_battery_max": row[6],
+            "steps": row[7],
+            "sleep_duration": format_duration(row[8]),
+            "sleep_score": row[9],
         }
         summaries.append(summary)
 
@@ -290,10 +315,10 @@ def get_activities_from_db(start_date, end_date):
 
     c.execute(
         """
-        SELECT activity_id, date, activity_type, duration, distance, hr_zones, bb_impact
+        SELECT datetime, activity_type, duration, distance, hr_zones, bb_impact
         FROM activities
-        WHERE date >= ? AND date <= ?
-        ORDER BY date
+        WHERE datetime >= ? AND datetime <= ?
+        ORDER BY datetime DESC
     """,
         (start_date, end_date),
     )
@@ -304,13 +329,12 @@ def get_activities_from_db(start_date, end_date):
     activities = []
     for row in rows:
         activity = {
-            "activity_id": row[0],
-            "date": row[1],
-            "activity_type": row[2],
-            "duration": row[3],
-            "distance": row[4],
-            "hr_zones": json.loads(row[5]) if row[5] else None,
-            "bb_impact": row[6],
+            "datetime": row[0],
+            "activity_type": row[1],
+            "duration": format_duration(row[2]),
+            "distance": f"{row[3] / 1000:.2f}km" if row[3] is not None else None,
+            "hr_zones": json.loads(row[4]) if row[4] else None,
+            "bb_impact": row[5],
         }
         activities.append(activity)
 
@@ -346,7 +370,7 @@ def index():
             "endpoints": {
                 "/api/summary": {
                     "method": "GET",
-                    "parameters": {"months": "Number of months to fetch (default: 3)"},
+                    "parameters": {"months": "Number of months to fetch (default: 1)"},
                     "description": "Get daily summaries and activities for specified period",
                 }
             },
@@ -357,71 +381,68 @@ def index():
 @app.route("/api/summary")
 def api_summary():
     """Get daily summaries and activities for specified period."""
-    # Get months parameter (default: 3)
-    months = request.args.get("months", default=3, type=int)
+    # Get days parameter (default: 7 for last week)
+    days = request.args.get("days", default=7, type=int)
 
-    # Calculate date range
+    # Calculate date range - include today
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=months * 30)
+    start_date = end_date - timedelta(days=days - 1)  # -1 to include today
 
     start_date_str = start_date.strftime("%Y-%m-%d")
     end_date_str = end_date.strftime("%Y-%m-%d")
 
     print(f"Fetching data from {start_date_str} to {end_date_str}...")
 
-    # Initialize database
-    init_db()
+    # Skip database caching during development - fetch directly from API
+    try:
+        client = get_garmin_client()
 
-    # Check which dates are already in database
-    existing_dates = get_dates_in_db(start_date_str, end_date_str)
+        # Generate all dates in range
+        all_dates = []
+        current = end_date
+        while current >= start_date:
+            all_dates.append(current.strftime("%Y-%m-%d"))
+            current -= timedelta(days=1)
 
-    # Generate all dates in range
-    all_dates = []
-    current = start_date
-    while current <= end_date:
-        all_dates.append(current.strftime("%Y-%m-%d"))
-        current += timedelta(days=1)
+        # Fetch daily summaries
+        print(f"Fetching {len(all_dates)} days from Garmin Connect...")
+        daily_summaries = []
+        for date_str in tqdm(all_dates, desc="Daily summaries", unit="day"):
+            summary = fetch_daily_summary(client, date_str)
+            # Format sleep duration for display
+            if summary.get("sleep_duration"):
+                summary["sleep_duration"] = format_sleep_duration(summary["sleep_duration"])
+            daily_summaries.append(summary)
 
-    # Find missing dates
-    missing_dates = [d for d in all_dates if d not in existing_dates]
+        # Fetch activities for entire date range
+        print("Fetching activities...")
+        activities = fetch_activities(client, start_date_str, end_date_str)
 
-    if missing_dates:
-        print(f"Fetching {len(missing_dates)} missing days from Garmin Connect...")
+        # Format activity durations and distances for display
+        for activity in activities:
+            if activity.get("duration"):
+                activity["duration"] = format_duration(activity["duration"])
+            if activity.get("distance"):
+                activity["distance"] = f"{activity['distance'] / 1000:.2f}km"
 
-        try:
-            client = get_garmin_client()
+        print("✓ Data fetched successfully")
+        return jsonify({
+            "start_date": start_date_str,
+            "end_date": end_date_str,
+            "daily_summaries": daily_summaries,
+            "activities": activities
+        })
 
-            # Fetch missing daily summaries
-            print("Fetching daily summaries...")
-            for date_str in tqdm(missing_dates, desc="Daily summaries", unit="day"):
-                summary = fetch_daily_summary(client, date_str)
-                save_daily_summary(summary)
-
-            # Fetch activities for entire date range
-            print("Fetching activities...")
-            activities = fetch_activities(client, start_date_str, end_date_str)
-            for activity in activities:
-                save_activity(activity)
-
-            print("✓ Data fetched and cached")
-
-        except Exception as e:
-            print(f"Error fetching data from Garmin: {e}")
-            return jsonify({"error": str(e)}), 500
-    else:
-        print("All data already cached")
-
-    # Retrieve data from database
-    daily_summaries = get_daily_summaries_from_db(start_date_str, end_date_str)
-    activities = get_activities_from_db(start_date_str, end_date_str)
-
-    return jsonify({"start_date": start_date_str, "end_date": end_date_str, "daily_summaries": daily_summaries, "activities": activities})
+    except Exception as e:
+        print(f"Error fetching data from Garmin: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
     print("Garmin Connect Log API")
     print("=" * 50)
     print("Starting Flask server on http://127.0.0.1:5000")
-    print("API endpoint: http://127.0.0.1:5000/api/summary?months=3")
+    print("API endpoint: http://127.0.0.1:5000/api/summary?days=7")
+    print("(default: last 7 days including today)")
     print()
     app.run(debug=True, port=5000)
