@@ -28,6 +28,7 @@ This is a Flask API that fetches Garmin Connect health data for ME/CFS (Myalgic 
 - Auto-formatted with ruff
 - Import sorting with isort (via ruff)
 - Run `uv run ruff format .` before commits
+- **IMPORTANT**: Always run `./bin/format.sh` and `./bin/lint.sh` after making code changes to verify correctness
 
 ### Commands
 
@@ -44,8 +45,12 @@ connectlog/
 ├── pyproject.toml      # uv project configuration
 ├── .env.example        # Environment variable template
 ├── .env                # OAuth session token (gitignored)
+├── bin/
+│   ├── format.sh       # Code formatting script
+│   └── lint.sh         # Linting script
 ├── cache/
-│   └── data.db         # SQLite database (auto-generated)
+│   ├── summary-last-X-months.json    # Cached daily summaries (JSON)
+│   └── activities-last-X-months.json # Cached activities (JSON)
 └── README.md           # Documentation
 ```
 
@@ -58,28 +63,29 @@ connectlog/
 - Run `uv run setup_oauth.py` to generate token
 - Never commit `.env` file
 
-### Database Schema
+### Cache Storage
 
-**daily_summaries table:**
+Data is cached in JSON files (not SQLite database) for easy sharing:
 
-- date (PRIMARY KEY)
-- resting_hr, max_hr, hrv
-- body_battery_hourly (JSON array text)
+**summary-last-X-months.json:**
+
+- date, resting_hr, max_hr, hrv_overnight_avg
+- body_battery_hourly (JSON array of hourly values)
+- body_battery_min, body_battery_max
 - steps, sleep_duration, sleep_score
 
-**activities table:**
+**activities-last-X-months.json:**
 
-- activity_id (PRIMARY KEY)
-- date, activity_type, duration, distance
-- hr_zones (JSON array text)
+- datetime, activity_type, duration, distance
+- hr_zones (JSON array of time per zone)
 - bb_impact (body battery impact)
 
 ### Data Fetching Strategy
 
 - Configurable date range via `?months=3` parameter
-- Check database for existing data before API calls
-- Fetch only missing dates to minimize API usage
-- Store all data in SQLite for persistent caching
+- Check JSON cache for existing data before API calls
+- If cache exists, return immediately (no incremental updates)
+- If no cache, fetch all data from Garmin and save to JSON
 - Use tqdm progress bars for batch operations
 - Skip individual dates/activities on errors (partial data OK)
 
@@ -156,7 +162,7 @@ def fetch_new_metric(client, date_str):
 
 - Test authentication: `uv run setup_oauth.py`
 - Test API: `curl http://127.0.0.1:5000/api/summary?months=1`
-- Clear cache: `rm cache/data.db` then re-fetch
+- Clear cache: `rm cache/*.json` then re-fetch
 
 ## Resources
 

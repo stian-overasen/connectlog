@@ -6,7 +6,6 @@ Flask app to fetch and analyze Garmin Connect health data for ME/CFS PEM thresho
 
 import json
 import os
-import sqlite3
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
@@ -22,48 +21,37 @@ app.json.sort_keys = False
 
 # Configuration
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
-DB_PATH = os.path.join(CACHE_DIR, "data.db")
 GARMIN_SESSION = os.getenv("GARMIN_SESSION")
 
 # Ensure cache directory exists
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 
-def init_db():
-    """Initialize SQLite database with schema."""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+def get_cache_filename(data_type, months):
+    """Get cache filename for specified data type and months."""
+    return os.path.join(CACHE_DIR, f"{data_type}-last-{months}-months.json")
 
-    # Daily summaries table
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS daily_summaries (
-            date TEXT PRIMARY KEY,
-            resting_hr INTEGER,
-            max_hr INTEGER,
-            hrv REAL,
-            body_battery_hourly TEXT,
-            body_battery_min INTEGER,
-            body_battery_max INTEGER,
-            steps INTEGER,
-            sleep_duration INTEGER,
-            sleep_score INTEGER
-        )
-    """)
 
-    # Activities table
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS activities (
-            datetime TEXT PRIMARY KEY,
-            activity_type TEXT,
-            duration INTEGER,
-            distance REAL,
-            hr_zones TEXT,
-            bb_impact INTEGER
-        )
-    """)
+def load_cache(data_type, months):
+    """Load cached data from JSON file."""
+    cache_file = get_cache_filename(data_type, months)
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file) as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Warning: Failed to load cache from {cache_file}: {e}")
+    return None
 
-    conn.commit()
-    conn.close()
+
+def save_cache(data_type, months, data):
+    """Save data to JSON cache file."""
+    cache_file = get_cache_filename(data_type, months)
+    try:
+        with open(cache_file, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Warning: Failed to save cache to {cache_file}: {e}")
 
 
 def get_garmin_client():
@@ -84,7 +72,7 @@ def get_garmin_client():
         # Fallback to getting display name from user summary
         try:
             profile = client.get_user_profile()
-            client.display_name = profile.get('displayName') or profile.get('userName')
+            client.display_name = profile.get("displayName") or profile.get("userName")
         except Exception:
             pass
 
@@ -118,7 +106,7 @@ def fetch_daily_summary(client, date_str):
         "date": date_str,
         "resting_hr": None,
         "max_hr": None,
-        "hrv": None,
+        "hrv_overnight_avg": None,
         "body_battery_hourly": None,
         "body_battery_min": None,
         "body_battery_max": None,
@@ -141,7 +129,7 @@ def fetch_daily_summary(client, date_str):
         # Get HRV data
         hrv_data = client.get_hrv_data(date_str)
         if hrv_data and "hrvSummary" in hrv_data:
-            summary["hrv"] = hrv_data["hrvSummary"].get("lastNightAvg")
+            summary["hrv_overnight_avg"] = hrv_data["hrvSummary"].get("lastNightAvg")
     except Exception as e:
         print(f"  Warning: Failed to get HRV for {date_str}: {e}")
 
@@ -154,7 +142,7 @@ def fetch_daily_summary(client, date_str):
                 values = [tup[-1] for tup in entry.get("bodyBatteryValuesArray", [])]
 
             if values:
-                summary["body_battery_hourly"] = ",".join(map(str, values))
+                summary["body_battery_hourly"] = values  # Store as array
                 summary["body_battery_max"] = max(values)
                 summary["body_battery_min"] = min(values)
     except Exception as e:
@@ -217,147 +205,26 @@ def fetch_activities(client, start_date, end_date):
     return activities
 
 
-def save_daily_summary(summary):
-    """Save daily summary to database."""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    c.execute(
-        """
-        INSERT OR REPLACE INTO daily_summaries
-        (date, resting_hr, max_hr, hrv, body_battery_hourly, body_battery_min, body_battery_max, steps, sleep_duration, sleep_score)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """,
-        (
-            summary["date"],
-            summary["resting_hr"],
-            summary["max_hr"],
-            summary["hrv"],
-            summary["body_battery_hourly"],
-            summary["body_battery_min"],
-            summary["body_battery_max"],
-            summary["steps"],
-            summary["sleep_duration"],
-            summary["sleep_score"],
-        ),
-    )
-
-    conn.commit()
-    conn.close()
+def format_summaries_for_output(summaries):
+    """Format summaries with human-readable durations for output."""
+    formatted = []
+    for summary in summaries:
+        formatted_summary = summary.copy()
+        formatted_summary["sleep_duration"] = format_sleep_duration(summary.get("sleep_duration"))
+        formatted.append(formatted_summary)
+    return formatted
 
 
-def save_activity(activity):
-    """Save activity to database."""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    c.execute(
-        """
-        INSERT OR REPLACE INTO activities
-        (datetime, activity_type, duration, distance, hr_zones, bb_impact)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """,
-        (
-            activity["datetime"],
-            activity["activity_type"],
-            activity["duration"],
-            activity["distance"],
-            activity["hr_zones"],
-            activity["bb_impact"],
-        ),
-    )
-
-    conn.commit()
-    conn.close()
-
-
-def get_daily_summaries_from_db(start_date, end_date):
-    """Retrieve daily summaries from database."""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    c.execute(
-        """
-        SELECT date, resting_hr, max_hr, hrv, body_battery_hourly, body_battery_min, body_battery_max, steps, sleep_duration, sleep_score
-        FROM daily_summaries
-        WHERE date >= ? AND date <= ?
-        ORDER BY date DESC
-    """,
-        (start_date, end_date),
-    )
-
-    rows = c.fetchall()
-    conn.close()
-
-    summaries = []
-    for row in rows:
-        summary = {
-            "date": row[0],
-            "resting_hr": row[1],
-            "max_hr": row[2],
-            "hrv": row[3],
-            "body_battery_hourly": row[4],
-            "body_battery_min": row[5],
-            "body_battery_max": row[6],
-            "steps": row[7],
-            "sleep_duration": format_duration(row[8]),
-            "sleep_score": row[9],
-        }
-        summaries.append(summary)
-
-    return summaries
-
-
-def get_activities_from_db(start_date, end_date):
-    """Retrieve activities from database."""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    c.execute(
-        """
-        SELECT datetime, activity_type, duration, distance, hr_zones, bb_impact
-        FROM activities
-        WHERE datetime >= ? AND datetime <= ?
-        ORDER BY datetime DESC
-    """,
-        (start_date, end_date),
-    )
-
-    rows = c.fetchall()
-    conn.close()
-
-    activities = []
-    for row in rows:
-        activity = {
-            "datetime": row[0],
-            "activity_type": row[1],
-            "duration": format_duration(row[2]),
-            "distance": f"{row[3] / 1000:.2f}km" if row[3] is not None else None,
-            "hr_zones": json.loads(row[4]) if row[4] else None,
-            "bb_impact": row[5],
-        }
-        activities.append(activity)
-
-    return activities
-
-
-def get_dates_in_db(start_date, end_date):
-    """Get set of dates that already have data in database."""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    c.execute(
-        """
-        SELECT DISTINCT date FROM daily_summaries
-        WHERE date >= ? AND date <= ?
-    """,
-        (start_date, end_date),
-    )
-
-    dates = {row[0] for row in c.fetchall()}
-    conn.close()
-
-    return dates
+def format_activities_for_output(activities):
+    """Format activities with human-readable durations and distances for output."""
+    formatted = []
+    for activity in activities:
+        formatted_activity = activity.copy()
+        formatted_activity["duration"] = format_duration(activity.get("duration"))
+        if activity.get("distance") is not None:
+            formatted_activity["distance"] = f"{activity['distance'] / 1000:.2f}km"
+        formatted.append(formatted_activity)
+    return formatted
 
 
 @app.route("/")
@@ -370,9 +237,18 @@ def index():
             "endpoints": {
                 "/api/summary": {
                     "method": "GET",
-                    "parameters": {"months": "Number of months to fetch (default: 1)"},
-                    "description": "Get daily summaries and activities for specified period",
-                }
+                    "parameters": {
+                        "months": "Number of months to fetch (default: 2)",
+                    },
+                    "description": "Get daily health summaries for specified period",
+                },
+                "/api/activities": {
+                    "method": "GET",
+                    "parameters": {
+                        "months": "Number of months to fetch (default: 2)",
+                    },
+                    "description": "Get activities for specified period",
+                },
             },
         }
     )
@@ -380,22 +256,26 @@ def index():
 
 @app.route("/api/summary")
 def api_summary():
-    """Get daily summaries and activities for specified period."""
-    # Get days parameter (default: 7 for last week)
-    days = request.args.get("days", default=7, type=int)
+    """Get daily health summaries for specified period."""
+    # Get months parameter (default: 2)
+    months = request.args.get("months", default=2, type=int)
 
     # Calculate date range - include today
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=days - 1)  # -1 to include today
+    start_date = end_date - timedelta(days=months * 30)  # Approximate months
 
     start_date_str = start_date.strftime("%Y-%m-%d")
     end_date_str = end_date.strftime("%Y-%m-%d")
 
-    print(f"Fetching data from {start_date_str} to {end_date_str}...")
+    print(f"Fetching summaries from {start_date_str} to {end_date_str}...")
 
-    # Skip database caching during development - fetch directly from API
     try:
-        client = get_garmin_client()
+        # Try to load from cache
+        cached_data = load_cache("summary", months)
+
+        if cached_data:
+            print(f"✓ Loaded summaries from cache (summary-last-{months}-months.json)")
+            return jsonify(cached_data)
 
         # Generate all dates in range
         all_dates = []
@@ -404,37 +284,77 @@ def api_summary():
             all_dates.append(current.strftime("%Y-%m-%d"))
             current -= timedelta(days=1)
 
-        # Fetch daily summaries
+        # Fetch daily summaries from Garmin
         print(f"Fetching {len(all_dates)} days from Garmin Connect...")
+        client = get_garmin_client()
+
         daily_summaries = []
         for date_str in tqdm(all_dates, desc="Daily summaries", unit="day"):
             summary = fetch_daily_summary(client, date_str)
-            # Format sleep duration for display
-            if summary.get("sleep_duration"):
-                summary["sleep_duration"] = format_sleep_duration(summary["sleep_duration"])
             daily_summaries.append(summary)
 
-        # Fetch activities for entire date range
-        print("Fetching activities...")
-        activities = fetch_activities(client, start_date_str, end_date_str)
-
-        # Format activity durations and distances for display
-        for activity in activities:
-            if activity.get("duration"):
-                activity["duration"] = format_duration(activity["duration"])
-            if activity.get("distance"):
-                activity["distance"] = f"{activity['distance'] / 1000:.2f}km"
-
-        print("✓ Data fetched successfully")
-        return jsonify({
+        # Prepare response data
+        response_data = {
             "start_date": start_date_str,
             "end_date": end_date_str,
-            "daily_summaries": daily_summaries,
-            "activities": activities
-        })
+            "daily_summaries": format_summaries_for_output(daily_summaries),
+        }
+
+        # Save to cache
+        save_cache("summary", months, response_data)
+        print(f"✓ Summaries cached to summary-last-{months}-months.json")
+
+        return jsonify(response_data)
 
     except Exception as e:
-        print(f"Error fetching data from Garmin: {e}")
+        print(f"Error fetching summaries from Garmin: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/activities")
+def api_activities():
+    """Get activities for specified period."""
+    # Get months parameter (default: 2)
+    months = request.args.get("months", default=2, type=int)
+
+    # Calculate date range - include today
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=months * 30)  # Approximate months
+
+    start_date_str = start_date.strftime("%Y-%m-%d")
+    end_date_str = end_date.strftime("%Y-%m-%d")
+
+    print(f"Fetching activities from {start_date_str} to {end_date_str}...")
+
+    try:
+        # Try to load from cache
+        cached_data = load_cache("activities", months)
+
+        if cached_data:
+            print(f"✓ Loaded activities from cache (activities-last-{months}-months.json)")
+            return jsonify(cached_data)
+
+        # Fetch activities from Garmin
+        print("Fetching activities from Garmin Connect...")
+        client = get_garmin_client()
+
+        activities = fetch_activities(client, start_date_str, end_date_str)
+
+        # Prepare response data
+        response_data = {
+            "start_date": start_date_str,
+            "end_date": end_date_str,
+            "activities": format_activities_for_output(activities),
+        }
+
+        # Save to cache
+        save_cache("activities", months, response_data)
+        print(f"✓ Activities cached to activities-last-{months}-months.json")
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        print(f"Error fetching activities from Garmin: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -442,7 +362,9 @@ if __name__ == "__main__":
     print("Garmin Connect Log API")
     print("=" * 50)
     print("Starting Flask server on http://127.0.0.1:5000")
-    print("API endpoint: http://127.0.0.1:5000/api/summary?days=7")
-    print("(default: last 7 days including today)")
+    print("API endpoints:")
+    print("  /api/summary - Daily health summaries")
+    print("  /api/activities - Activities")
+    print("Parameters: months=2 (default)")
     print()
     app.run(debug=True, port=5000)

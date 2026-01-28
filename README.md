@@ -87,7 +87,7 @@ curl http://127.0.0.1:5000/api/summary
       "date": "2025-10-26",
       "resting_hr": 55,
       "max_hr": 160,
-      "hrv": 45,
+      "hrv_overnight_avg": 45,
       "body_battery_hourly": [
         { "hour": 0, "value": 85 },
         { "hour": 1, "value": 88 },
