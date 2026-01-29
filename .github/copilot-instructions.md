@@ -71,7 +71,7 @@ Data is cached in JSON files (not SQLite database) for easy sharing:
 
 - date, resting_hr, max_hr, hrv_overnight_avg
 - body_battery_min, body_battery_max
-- steps, sleep_duration, sleep_score
+- steps, sleep_duration, sleep_score, num_activities
 
 **activities-last-X-months.json:**
 

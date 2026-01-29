@@ -363,8 +363,6 @@ def api_activities():
 
         # Prepare response data
         response_data = {
-            "start_date": start_date_str,
-            "end_date": end_date_str,
             "activities": format_activities_for_output(activities),
         }
 

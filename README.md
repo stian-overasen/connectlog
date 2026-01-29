@@ -4,10 +4,10 @@
 
 ## Features
 
-- **Daily Health Summaries**: Resting HR, max HR, HRV, hourly body battery values, steps, sleep duration, and sleep scores
+- **Daily Health Summaries**: Resting HR, max HR, HRV, body battery min/max, steps, sleep duration, sleep scores, and activity count per day
 - **Activity Details**: Type, duration, distance, time in each heart rate zone, and body battery impact
-- **Smart Caching**: SQLite database stores fetched data (delete `cache/data.db` to refresh)
-- **Configurable Date Range**: Query parameter for months (default: 3)
+- **Smart Caching**: JSON files cache fetched data (delete cache files to refresh)
+- **Configurable Date Range**: Query parameter for months (default: 2)
 - **ME/CFS Research Focus**: All HR zones and body battery data for PEM threshold analysis
 
 ## Setup
@@ -80,17 +80,18 @@ curl http://127.0.0.1:5000/api/summary
 
 ```json
 {
-  "start_date": "2025-10-26",
-  "end_date": "2026-01-26",
-  "daily_summaries": [
+  "summaries": [
     {
       "date": "2025-10-26",
+      "steps": 8500,
+      "hrv_overnight_avg": 45,
       "resting_hr": 55,
       "max_hr": 160,
-      "hrv_overnight_avg": 45,
-      "steps": 8500,
-      "sleep_duration": 26400,
-      "sleep_score": 77
+      "body_battery_max": 100,
+      "body_battery_min": 34,
+      "sleep_duration": "7h 20m",
+      "sleep_score": 77,
+      "num_activities": 2
     }
   ],
   "activities": [
@@ -118,12 +119,15 @@ curl http://127.0.0.1:5000/api/summary
 ### Daily Summaries
 
 - `date`: Date in YYYY-MM-DD format
+- `steps`: Total steps for the day
+- `hrv_overnight_avg`: Overnight average heart rate variability (ms)
 - `resting_hr`: Average resting heart rate (bpm)
 - `max_hr`: Maximum heart rate during the day (bpm)
-- `hrv`: Heart rate variability (ms)
-- `steps`: Total steps for the day
-- `sleep_duration`: Sleep duration in seconds
+- `body_battery_max`: Maximum body battery level (0-100)
+- `body_battery_min`: Minimum body battery level (0-100)
+- `sleep_duration`: Sleep duration (formatted as "Xh XXm")
 - `sleep_score`: Garmin sleep score (0-100)
+- `num_activities`: Number of activities recorded on this date
 
 ### Activities
 
