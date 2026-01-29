@@ -88,15 +88,6 @@ curl http://127.0.0.1:5000/api/summary
       "resting_hr": 55,
       "max_hr": 160,
       "hrv_overnight_avg": 45,
-      "body_battery_hourly": [
-        { "hour": 0, "value": 85 },
-        { "hour": 1, "value": 88 },
-        { "hour": 2, "value": 92 },
-        { "hour": 6, "value": 100 },
-        { "hour": 12, "value": 75 },
-        { "hour": 18, "value": 45 },
-        { "hour": 23, "value": 34 }
-      ],
       "steps": 8500,
       "sleep_duration": 26400,
       "sleep_score": 77
@@ -130,7 +121,6 @@ curl http://127.0.0.1:5000/api/summary
 - `resting_hr`: Average resting heart rate (bpm)
 - `max_hr`: Maximum heart rate during the day (bpm)
 - `hrv`: Heart rate variability (ms)
-- `body_battery_hourly`: Array of hourly body battery values (0-100)
 - `steps`: Total steps for the day
 - `sleep_duration`: Sleep duration in seconds
 - `sleep_score`: Garmin sleep score (0-100)

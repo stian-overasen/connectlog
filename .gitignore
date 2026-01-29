@@ -17,7 +17,6 @@ __pycache__/
 
 # uv
 .venv
-uv.lock
 
 # Node
 node_modules/

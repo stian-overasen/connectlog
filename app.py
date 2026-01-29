@@ -22,6 +22,7 @@ app.json.sort_keys = False
 # Configuration
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 GARMIN_SESSION = os.getenv("GARMIN_SESSION")
+GARMIN_NAME = os.getenv("GARMIN_NAME")
 
 # Ensure cache directory exists
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -67,7 +68,7 @@ def get_garmin_client():
     profile = client.get_user_profile()
 
     try:
-        client.display_name = client.get_full_name() or "N/A"
+        client.display_name = client.get_full_name() or GARMIN_NAME
     except Exception:
         # Fallback to getting display name from user summary
         try:
@@ -104,24 +105,25 @@ def fetch_daily_summary(client, date_str):
     """Fetch daily health summary for a specific date."""
     summary = {
         "date": date_str,
+        "steps": None,
+        "hrv_overnight_avg": None,
         "resting_hr": None,
         "max_hr": None,
-        "hrv_overnight_avg": None,
-        "body_battery_hourly": None,
-        "body_battery_min": None,
         "body_battery_max": None,
-        "steps": None,
+        "body_battery_min": None,
+        "body_battery_values": None,
         "sleep_duration": None,
         "sleep_score": None,
+        "num_activities": 0,
     }
 
     try:
         # Get daily stats (resting HR, max HR, steps)
         stats = client.get_stats(date_str)
         if stats:
+            summary["steps"] = stats.get("totalSteps")
             summary["resting_hr"] = stats.get("restingHeartRate")
             summary["max_hr"] = stats.get("maxHeartRate")
-            summary["steps"] = stats.get("totalSteps")
     except Exception as e:
         print(f"  Warning: Failed to get stats for {date_str}: {e}")
 
@@ -142,9 +144,9 @@ def fetch_daily_summary(client, date_str):
                 values = [tup[-1] for tup in entry.get("bodyBatteryValuesArray", [])]
 
             if values:
-                summary["body_battery_hourly"] = values  # Store as array
                 summary["body_battery_max"] = max(values)
                 summary["body_battery_min"] = min(values)
+                summary["body_battery_values"] = values
     except Exception as e:
         print(f"  Warning: Failed to get Body Battery for {date_str}: {e}")
 
@@ -203,6 +205,18 @@ def fetch_activities(client, start_date, end_date):
         print(f"  Warning: Failed to get activities: {e}")
 
     return activities
+
+
+def count_activities_by_date(activities):
+    """Count activities per date from activities list."""
+    activity_counts = {}
+    for activity in activities:
+        # Extract date from datetime string (format: "YYYY-MM-DD HH:MM:SS")
+        datetime_str = activity.get("datetime", "")
+        if datetime_str:
+            date = datetime_str.split()[0] if " " in datetime_str else datetime_str[:10]
+            activity_counts[date] = activity_counts.get(date, 0) + 1
+    return activity_counts
 
 
 def format_summaries_for_output(summaries):
@@ -293,11 +307,18 @@ def api_summary():
             summary = fetch_daily_summary(client, date_str)
             daily_summaries.append(summary)
 
+        # Fetch activities and count per date
+        print("Fetching activities to count per day...")
+        activities = fetch_activities(client, start_date_str, end_date_str)
+        activity_counts = count_activities_by_date(activities)
+
+        # Add activity counts to summaries
+        for summary in daily_summaries:
+            summary["num_activities"] = activity_counts.get(summary["date"], 0)
+
         # Prepare response data
         response_data = {
-            "start_date": start_date_str,
-            "end_date": end_date_str,
-            "daily_summaries": format_summaries_for_output(daily_summaries),
+            "summaries": format_summaries_for_output(daily_summaries),
         }
 
         # Save to cache
