@@ -43,6 +43,10 @@
 
    Enter your Garmin Connect email and password when prompted. This generates a session token saved to `.env` (valid for ~1 year).
 
+4. **(Optional) Configure HR zone context overrides**
+
+Create a JSON file with date-based device settings and point to it in `.env` via `HR_PROFILE_OVERRIDES_PATH`. If the file is missing, the API defaults to Garmin zones. See [hr_profiles.example.json](hr_profiles.example.json).
+
 ## Usage
 
 ### Start the Flask API
@@ -102,13 +106,15 @@ curl http://127.0.0.1:5000/api/summary
       "duration": 3600,
       "distance": 10000.0,
       "hr_zones": [
-        { "zone": 1, "time_seconds": 300 },
-        { "zone": 2, "time_seconds": 1200 },
-        { "zone": 3, "time_seconds": 1500 },
-        { "zone": 4, "time_seconds": 600 },
-        { "zone": 5, "time_seconds": 0 }
+        { "Zone 1 (Garmin)": 1, "time_seconds": 300 },
+        { "Zone 2 (Garmin)": 2, "time_seconds": 1200 },
+        { "Zone 3 (Garmin)": 3, "time_seconds": 1500 },
+        { "Zone 4 (Garmin)": 4, "time_seconds": 600 },
+        { "Zone 5 (Garmin)": 5, "time_seconds": 0 }
       ],
-      "bb_impact": -28
+      "device": "Fenix 7S",
+      "device_max_hr": 184,
+      "body_battery_impact": -28
     }
   ]
 }
@@ -136,13 +142,37 @@ curl http://127.0.0.1:5000/api/summary
 - `activity_type`: Type of activity (running, cycling, walking, etc.)
 - `duration`: Activity duration in seconds
 - `distance`: Distance in meters
-- `hr_zones`: Array of time spent in each heart rate zone (seconds)
-  - Zone 1: Warm-up / Recovery
-  - Zone 2: Easy / Fat burn
-  - Zone 3: Aerobic / Endurance
-  - Zone 4: Threshold / Performance
-  - Zone 5: Maximum / Speed
-- `bb_impact`: Body battery net impact (negative = drain, positive = gain)
+- `hr_zones`: Array of time spent in each heart rate zone with scheme-specific labels
+  - Zone label format: `Zone 1 (Garmin)` or `I-1 (Olympiatoppen)`
+  - Each zone includes the zone number and time in seconds
+- `device`: Device name (e.g., "Fenix 7S")
+- `device_max_hr`: Max heart rate configured on device at time of activity (bpm)
+- `body_battery_impact`: Body battery net impact (negative = drain, positive = gain)
+
+### HR Zone Percentages
+
+Top-level context providing zone definitions for both schemes:
+
+- `hr_zone_percentages`: Object containing zone definitions for `garmin` and `olympiatoppen` schemes
+  - Each scheme includes zone labels with `min_percent` and `max_percent` of max HR
+
+### HR Zone Schemes
+
+**Garmin Zones:**
+
+- Zone 5: 90-100% of max HR (Maximum / Speed)
+- Zone 4: 80-89% of max HR (Threshold / Performance)
+- Zone 3: 70-79% of max HR (Aerobic / Endurance)
+- Zone 2: 60-69% of max HR (Easy / Fat burn)
+- Zone 1: 50-59% of max HR (Warm-up / Recovery)
+
+**Olympiatoppen Zones:**
+
+- I-5: 92-100% of max HR
+- I-4: 87-91% of max HR
+- I-3: 82-86% of max HR
+- I-2: 72-81% of max HR
+- I-1: 55-71% of max HR
 
 ## PEM Threshold Research
 

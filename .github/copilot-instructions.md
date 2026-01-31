@@ -77,7 +77,7 @@ Data is cached in JSON files (not SQLite database) for easy sharing:
 
 - datetime, activity_type, duration, distance
 - hr_zones (JSON array of time per zone)
-- bb_impact (body battery impact)
+- body_battery_impact (body battery impact)
 
 ### Data Fetching Strategy
 

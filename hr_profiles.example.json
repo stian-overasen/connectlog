@@ -1,0 +1,23 @@
+[
+  {
+    "start_date": null,
+    "end_date": "2023-11-28",
+    "device": "Fenix 6S",
+    "max_hr": null,
+    "zone_scheme": "olympiatoppen"
+  },
+  {
+    "start_date": "2023-11-29",
+    "end_date": "2026-01-27",
+    "device": "Fenix 7S",
+    "max_hr": 184,
+    "zone_scheme": "garmin"
+  },
+  {
+    "start_date": "2026-01-28",
+    "end_date": null,
+    "device": "Fenix 7S",
+    "max_hr": 169,
+    "zone_scheme": "olympiatoppen"
+  }
+]

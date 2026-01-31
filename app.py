@@ -23,9 +23,151 @@ app.json.sort_keys = False
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 GARMIN_SESSION = os.getenv("GARMIN_SESSION")
 GARMIN_NAME = os.getenv("GARMIN_NAME")
+HR_PROFILE_OVERRIDES_PATH = os.getenv("HR_PROFILE_OVERRIDES_PATH")
 
 # Ensure cache directory exists
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+GARMIN_ZONE_RANGES = [
+    {"label": "Zone 5", "min_percent": 90, "max_percent": 100},
+    {"label": "Zone 4", "min_percent": 80, "max_percent": 89},
+    {"label": "Zone 3", "min_percent": 70, "max_percent": 79},
+    {"label": "Zone 2", "min_percent": 60, "max_percent": 69},
+    {"label": "Zone 1", "min_percent": 50, "max_percent": 59},
+]
+
+OLYMPIATOPPEN_ZONE_RANGES = [
+    {"label": "I-5", "min_percent": 92, "max_percent": 100},
+    {"label": "I-4", "min_percent": 87, "max_percent": 91},
+    {"label": "I-3", "min_percent": 82, "max_percent": 86},
+    {"label": "I-2", "min_percent": 72, "max_percent": 81},
+    {"label": "I-1", "min_percent": 55, "max_percent": 71},
+]
+
+
+def parse_date_or_none(date_str, field_name):
+    """Parse a YYYY-MM-DD string to a date or return None."""
+    if date_str in (None, ""):
+        return None
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(f"Invalid {field_name}: {date_str}. Expected YYYY-MM-DD.") from exc
+
+
+def load_hr_profile_overrides():
+    """Load HR profile overrides from JSON file specified by HR_PROFILE_OVERRIDES_PATH."""
+    if not HR_PROFILE_OVERRIDES_PATH:
+        return []
+
+    if not os.path.exists(HR_PROFILE_OVERRIDES_PATH):
+        print(f"Warning: HR_PROFILE_OVERRIDES_PATH not found: {HR_PROFILE_OVERRIDES_PATH}")
+        return []
+
+    try:
+        with open(HR_PROFILE_OVERRIDES_PATH) as f:
+            raw_overrides = json.load(f)
+    except Exception as exc:
+        print(f"Warning: Failed to load HR profile overrides: {exc}")
+        return []
+
+    overrides = []
+    for entry in raw_overrides:
+        zone_scheme = (entry.get("zone_scheme") or "").lower()
+        if zone_scheme not in {"garmin", "olympiatoppen"}:
+            raise ValueError(f"Invalid zone_scheme in overrides: {zone_scheme}")
+
+        start_date = parse_date_or_none(entry.get("start_date"), "start_date")
+        end_date = parse_date_or_none(entry.get("end_date"), "end_date")
+
+        if start_date and end_date and start_date > end_date:
+            raise ValueError(f"start_date after end_date in overrides: {entry}")
+
+        overrides.append(
+            {
+                "start_date": start_date,
+                "end_date": end_date,
+                "device": entry.get("device"),
+                "max_hr": entry.get("max_hr"),
+                "zone_scheme": zone_scheme,
+            }
+        )
+
+    validate_hr_profile_overlaps(overrides)
+    return overrides
+
+
+def validate_hr_profile_overlaps(overrides):
+    """Validate that HR profile override ranges do not overlap."""
+    if not overrides:
+        return
+
+    def range_bounds(item):
+        start = item["start_date"] or datetime.min.date()
+        end = item["end_date"] or datetime.max.date()
+        return start, end
+
+    for idx, current in enumerate(overrides):
+        current_start, current_end = range_bounds(current)
+        for other in overrides[idx + 1 :]:
+            other_start, other_end = range_bounds(other)
+            overlaps = current_start <= other_end and other_start <= current_end
+            if overlaps:
+                raise ValueError(
+                    "Overlapping HR profile overrides detected between "
+                    f"{current.get('start_date')}–{current.get('end_date')} and "
+                    f"{other.get('start_date')}–{other.get('end_date')}"
+                )
+
+
+def get_hr_zone_context(activity_date, overrides):
+    """Get HR zone context for the activity date, using overrides or default Garmin zones."""
+    if activity_date is None:
+        return {
+            "zone_scheme": "garmin",
+            "max_hr": None,
+            "device": None,
+        }
+
+    selected = None
+    for override in overrides:
+        start = override["start_date"]
+        end = override["end_date"]
+        if start and activity_date < start:
+            continue
+        if end and activity_date > end:
+            continue
+        selected = override
+        break
+
+    return {
+        "zone_scheme": (selected or {}).get("zone_scheme", "garmin"),
+        "max_hr": (selected or {}).get("max_hr"),
+        "device": (selected or {}).get("device"),
+    }
+
+
+def format_hr_zones_with_labels(zones, zone_scheme):
+    """Format HR zones with scheme-specific labels."""
+    if not zones:
+        return None
+
+    scheme_name = "Olympiatoppen" if zone_scheme == "olympiatoppen" else "Garmin"
+    zone_ranges = OLYMPIATOPPEN_ZONE_RANGES if zone_scheme == "olympiatoppen" else GARMIN_ZONE_RANGES
+
+    formatted_zones = []
+    for zone_data in zones:
+        zone_num = zone_data["zone"]
+        # Find the matching zone label (zone_ranges are ordered 5 to 1)
+        zone_label = zone_ranges[5 - zone_num]["label"]
+        formatted_zones.append(
+            {
+                f"{zone_label} ({scheme_name})": zone_num,
+                "time_seconds": zone_data["time_seconds"],
+            }
+        )
+
+    return formatted_zones
 
 
 def get_cache_filename(data_type, months):
@@ -99,6 +241,9 @@ def format_sleep_duration(seconds):
     hours = seconds // 3600
     minutes = (seconds % 3600) // 60
     return f"{hours}h {minutes:02d}m"
+
+
+HR_PROFILE_OVERRIDES = load_hr_profile_overrides()
 
 
 def fetch_daily_summary(client, date_str):
@@ -185,10 +330,21 @@ def fetch_activities(client, start_date, end_date):
                 hr_zones = zones
 
             # Extract body battery impact from differenceBodyBattery
-            bb_impact = activity.get("differenceBodyBattery")
+            body_battery_impact = activity.get("differenceBodyBattery")
 
             # Combine date and time into single datetime string
             start_time_local = activity.get("startTimeLocal", "")
+            activity_date = None
+            if start_time_local:
+                try:
+                    activity_date = datetime.strptime(start_time_local[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    activity_date = None
+
+            hr_zone_context = get_hr_zone_context(activity_date, HR_PROFILE_OVERRIDES) if activity_date else get_hr_zone_context(None, HR_PROFILE_OVERRIDES)
+
+            # Format hr_zones with scheme-specific labels
+            formatted_hr_zones = format_hr_zones_with_labels(hr_zones, hr_zone_context["zone_scheme"])
 
             activities.append(
                 {
@@ -196,8 +352,10 @@ def fetch_activities(client, start_date, end_date):
                     "activity_type": activity.get("activityType", {}).get("typeKey"),
                     "duration": activity.get("duration"),
                     "distance": activity.get("distance"),
-                    "hr_zones": hr_zones,
-                    "bb_impact": bb_impact,
+                    "hr_zones": formatted_hr_zones,
+                    "device": hr_zone_context["device"],
+                    "device_max_hr": hr_zone_context["max_hr"],
+                    "body_battery_impact": body_battery_impact,
                 }
             )
 
@@ -364,6 +522,10 @@ def api_activities():
         # Prepare response data
         response_data = {
             "activities": format_activities_for_output(activities),
+            "hr_zone_percentages": {
+                "garmin": GARMIN_ZONE_RANGES,
+                "olympiatoppen": OLYMPIATOPPEN_ZONE_RANGES,
+            },
         }
 
         # Save to cache
