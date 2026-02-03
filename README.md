@@ -6,6 +6,7 @@
 
 - **Daily Health Summaries**: Resting HR, max HR, HRV, body battery min/max, steps, sleep duration, sleep scores, and activity count per day
 - **Activity Details**: Type, duration, distance, time in each heart rate zone, and body battery impact
+- **Training Readiness Status**: Real-time assessment combining HRV, body battery, sleep score, resting HR, and subjective energy levels
 - **Smart Caching**: JSON files cache fetched data (delete cache files to refresh)
 - **Configurable Date Range**: Query parameter for months (default: 2)
 - **ME/CFS Research Focus**: All HR zones and body battery data for PEM threshold analysis
@@ -73,12 +74,98 @@ curl http://127.0.0.1:5000/api/summary
 curl http://127.0.0.1:5000/api/summary?months=6
 ```
 
+**Check training readiness status**
+
+```bash
+# Open in browser (recommended)
+open http://127.0.0.1:5000/api/status
+
+# With energy level
+open "http://127.0.0.1:5000/api/status?energy=7"
+```
+
+The `energy` parameter is optional. Without it, the endpoint shows guidance for where each energy level would place you.
+
+**Note:** The status endpoint returns an HTML page designed for viewing in a browser, not JSON.
+
 **Refresh data**
 
 ```bash
 rm cache/data.db
 curl http://127.0.0.1:5000/api/summary
 ```
+
+## API Endpoints
+
+### `/api/summary`
+
+Returns daily health summaries for the specified time period.
+
+**Parameters:**
+
+- `months` (optional, default: 2) - Number of months to fetch
+
+**Response:** See [Example JSON Response](#example-json-response) below.
+
+### `/api/activities`
+
+Returns detailed activity data for the specified time period.
+
+**Parameters:**
+
+- `months` (optional, default: 2) - Number of months to fetch
+
+### `/api/status`
+
+**Returns:** HTML page (open in browser)
+
+Displays a visual "Morning Check" dashboard showing current training readiness status based on today's Garmin metrics and optionally your subjective energy level.
+
+**Parameters:**
+
+- `energy` (optional) - Subjective energy score from 1-10
+
+**Features:**
+
+- Beautiful, responsive HTML dashboard with color-coded metrics
+- Shows both **start-of-day Body Battery** (highest value) and **current Body Battery**
+- Only current Body Battery is used for status calculations
+- Each metric displays:
+  - Current value with status indicator (🟢 green, 🟡 yellow, 🔴 red)
+  - Threshold ranges for all three zones
+- Overall status banner with recommendation
+- Interactive energy level guidance
+
+**Usage:**
+
+1. **Without energy parameter:** Shows all metrics and asks for your energy level
+
+   ```
+   http://127.0.0.1:5000/api/status
+   ```
+
+2. **With energy parameter:** Shows personalized energy zone assessment
+   ```
+   http://127.0.0.1:5000/api/status?energy=7
+   ```
+
+**Status Colors:**
+
+- 🟢 **Green** (Training OK): Most metrics in healthy range
+- 🟡 **Yellow** (Light activity): Some metrics showing caution
+- 🔴 **Red** (Rest day): Two or more metrics in red zone
+
+**Metrics Evaluated:**
+
+| Metric               | 🟢 Green | 🟡 Yellow | 🔴 Red  |
+| -------------------- | -------- | --------- | ------- |
+| HRV                  | >62 ms   | 58-62 ms  | <58 ms  |
+| Body Battery (start) | >75      | 65-75     | <65     |
+| Sleep Score          | >75      | 70-75     | <70     |
+| Resting HR           | <48 bpm  | 48-50 bpm | >50 bpm |
+| Energy (subjective)  | 7-10/10  | 5-6/10    | 1-4/10  |
+
+**Note:** Body Battery (current) is shown for reference but not used in status calculations.
 
 ## Example JSON Response
 
