@@ -6,12 +6,18 @@ Flask app to fetch and analyze Garmin Connect health data for ME/CFS PEM thresho
 
 import json
 import os
+import sys
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from garminconnect import Garmin
 from tqdm import tqdm
+
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    FastMCP = None
 
 # Load environment variables
 load_dotenv()
@@ -246,6 +252,14 @@ def format_sleep_duration(seconds):
 HR_PROFILE_OVERRIDES = load_hr_profile_overrides()
 
 
+def parse_required_date(date_str, field_name):
+    """Parse and validate a required YYYY-MM-DD date string."""
+    parsed = parse_date_or_none(date_str, field_name)
+    if parsed is None:
+        raise ValueError(f"Missing required {field_name}. Expected YYYY-MM-DD.")
+    return parsed
+
+
 def fetch_daily_summary(client, date_str):
     """Fetch daily health summary for a specific date."""
     summary = {
@@ -397,6 +411,81 @@ def format_activities_for_output(activities):
             formatted_activity["distance"] = f"{activity['distance'] / 1000:.2f}km"
         formatted.append(formatted_activity)
     return formatted
+
+
+def create_mcp_server():
+    """Create an MCP server exposing Garmin fetch tools."""
+    if FastMCP is None:
+        raise RuntimeError("MCP support requires the 'mcp' package. Run 'uv sync' to install dependencies.")
+
+    mcp = FastMCP("connectlog")
+
+    @mcp.tool(name="fetch_daily_summary")
+    def mcp_fetch_daily_summary(date):
+        """Fetch Garmin daily summary for a single date.
+
+        Args:
+            date: Date in YYYY-MM-DD format.
+        """
+        parsed_date = parse_required_date(date, "date")
+        client = get_garmin_client()
+        return fetch_daily_summary(client, parsed_date.strftime("%Y-%m-%d"))
+
+    @mcp.tool(name="fetch_activities")
+    def mcp_fetch_activities(start_date, end_date):
+        """Fetch Garmin activities for a date range.
+
+        Args:
+            start_date: Start date in YYYY-MM-DD format.
+            end_date: End date in YYYY-MM-DD format.
+        """
+        parsed_start = parse_required_date(start_date, "start_date")
+        parsed_end = parse_required_date(end_date, "end_date")
+        if parsed_start > parsed_end:
+            raise ValueError("start_date must be before or equal to end_date.")
+
+        activities = fetch_activities(
+            client=get_garmin_client(),
+            start_date=parsed_start.strftime("%Y-%m-%d"),
+            end_date=parsed_end.strftime("%Y-%m-%d"),
+        )
+        return {
+            "activities": format_activities_for_output(activities),
+            "hr_zone_percentages": {
+                "garmin": GARMIN_ZONE_RANGES,
+                "olympiatoppen": OLYMPIATOPPEN_ZONE_RANGES,
+            },
+        }
+
+    return mcp
+
+
+def run_flask_server():
+    """Run Flask API server."""
+    print("Garmin Connect Log API")
+    print("=" * 50)
+    print("Starting Flask server on http://127.0.0.1:5000")
+    print("API endpoints:")
+    print("  /api/summary - Daily health summaries (JSON)")
+    print("  /api/activities - Activities (JSON)")
+    print("  /api/status - Training readiness status (HTML - open in browser)")
+    print("Parameters:")
+    print("  months=2 (default for summary/activities)")
+    print("  energy=1-10 (optional for status)")
+    print()
+    app.run(debug=True, port=5000)
+
+
+def run_mcp_server():
+    """Run MCP server exposing Garmin fetch tools over stdio."""
+    mcp_server = create_mcp_server()
+    print("Garmin Connect Log MCP server")
+    print("=" * 50)
+    print("Starting MCP server over stdio")
+    print("Tools:")
+    print("  fetch_daily_summary(date)")
+    print("  fetch_activities(start_date, end_date)")
+    mcp_server.run()
 
 
 @app.route("/")
@@ -600,7 +689,6 @@ def status():
                 "green": ">75",
                 "yellow": "65-75",
                 "red": "<65",
-
             },
             {
                 "metric": "Body Battery (current)",
@@ -930,15 +1018,7 @@ def status():
 
 
 if __name__ == "__main__":
-    print("Garmin Connect Log API")
-    print("=" * 50)
-    print("Starting Flask server on http://127.0.0.1:5000")
-    print("API endpoints:")
-    print("  /api/summary - Daily health summaries (JSON)")
-    print("  /api/activities - Activities (JSON)")
-    print("  /api/status - Training readiness status (HTML - open in browser)")
-    print("Parameters:")
-    print("  months=2 (default for summary/activities)")
-    print("  energy=1-10 (optional for status)")
-    print()
-    app.run(debug=True, port=5000)
+    if "--mcp" in sys.argv:
+        run_mcp_server()
+    else:
+        run_flask_server()

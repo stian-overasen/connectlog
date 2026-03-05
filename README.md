@@ -7,6 +7,7 @@
 - **Daily Health Summaries**: Resting HR, max HR, HRV, body battery min/max, steps, sleep duration, sleep scores, and activity count per day
 - **Activity Details**: Type, duration, distance, time in each heart rate zone, and body battery impact
 - **Training Readiness Status**: Real-time assessment combining HRV, body battery, sleep score, resting HR, and subjective energy levels
+- **MCP Support**: Exposes Garmin fetch functions as MCP tools for AI clients
 - **Smart Caching**: JSON files cache fetched data (delete cache files to refresh)
 - **Configurable Date Range**: Query parameter for months (default: 2)
 - **ME/CFS Research Focus**: All HR zones and body battery data for PEM threshold analysis
@@ -57,6 +58,17 @@ uv run app.py
 ```
 
 The API runs on `http://127.0.0.1:5000`
+
+### Start the MCP Server
+
+```bash
+uv run app.py --mcp
+```
+
+This starts an MCP server over stdio with tools:
+
+- `fetch_daily_summary(date)`
+- `fetch_activities(start_date, end_date)`
 
 On first run, the API will fetch data from Garmin Connect with progress indicators. Subsequent runs use cached data from the SQLite database.
 
@@ -164,6 +176,17 @@ Displays a visual "Morning Check" dashboard showing current training readiness s
 | Sleep Score          | >75      | 70-75     | <70     |
 | Resting HR           | <48 bpm  | 48-50 bpm | >50 bpm |
 | Energy (subjective)  | 7-10/10  | 5-6/10    | 1-4/10  |
+
+## MCP Tools
+
+When running with `uv run app.py --mcp`, the server exposes:
+
+- `fetch_daily_summary(date)`
+  - Input: `date` in `YYYY-MM-DD`
+  - Output: Same daily summary object used by `/api/summary`
+- `fetch_activities(start_date, end_date)`
+  - Input: `start_date` and `end_date` in `YYYY-MM-DD`
+  - Output: Activities payload with formatted durations/distances and `hr_zone_percentages`
 
 **Note:** Body Battery (current) is shown for reference but not used in status calculations.
 
