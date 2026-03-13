@@ -49,8 +49,8 @@ connectlog/
 │   ├── format.sh       # Code formatting script
 │   └── lint.sh         # Linting script
 ├── cache/
-│   ├── summary-last-X-months.json    # Cached daily summaries (JSON)
-│   └── activities-last-X-months.json # Cached activities (JSON)
+│   ├── summary-last-X-weeks.json     # Cached daily summaries (JSON)
+│   └── activities-last-X-weeks.json  # Cached activities (JSON)
 └── README.md           # Documentation
 ```
 
@@ -67,13 +67,13 @@ connectlog/
 
 Data is cached in JSON files (not SQLite database) for easy sharing:
 
-**summary-last-X-months.json:**
+**summary-last-X-weeks.json:**
 
-- date, resting_hr, max_hr, hrv_overnight_avg
-- body_battery_min, body_battery_max
-- steps, sleep_duration, sleep_score, num_activities
+- date, restingHeartRate, maxHeartRate, hrvLastNightAvg
+- bodyBatteryMin, bodyBatteryMax
+- totalSteps, sleepDuration, sleepScore, numberOfActivities
 
-**activities-last-X-months.json:**
+**activities-last-X-weeks.json:**
 
 - datetime, activity_type, duration, distance
 - hr_zones (JSON array of time per zone)
@@ -81,7 +81,7 @@ Data is cached in JSON files (not SQLite database) for easy sharing:
 
 ### Data Fetching Strategy
 
-- Configurable date range via `?months=3` parameter
+- Configurable date range via `?weeks=3` parameter
 - Check JSON cache for existing data before API calls
 - If cache exists, return immediately (no incremental updates)
 - If no cache, fetch all data from Garmin and save to JSON
@@ -160,7 +160,7 @@ def fetch_new_metric(client, date_str):
 ## Testing
 
 - Test authentication: `uv run setup_oauth.py`
-- Test API: `curl http://127.0.0.1:5000/api/summary?months=1`
+- Test API: `curl http://127.0.0.1:5000/api/summary?weeks=1`
 - Clear cache: `rm cache/*.json` then re-fetch
 
 ## Resources

@@ -1,16 +1,15 @@
 # Garmin Connect Log
 
-**TL;DR**: Flask API that fetches Garmin Connect health data (daily summaries and activities) to analyze ME/CFS PEM (Post-Exertional Malaise) thresholds. Returns comprehensive JSON with heart rate zones, body battery trends, sleep metrics, and activity details for research purposes.
+**TL;DR**: Flask API that fetches Garmin Connect health data (daily summaries and activities) to analyze ME/CFS PEM (Post-Exertional Malaise) thresholds. Returns comprehensive JSON with heart rate zones, body battery min/max, sleep metrics, and activity details for research purposes.
 
 ## Features
 
 - **Daily Health Summaries**: Resting HR, max HR, HRV, body battery min/max, steps, sleep duration, sleep scores, and activity count per day
 - **Activity Details**: Type, duration, distance, time in each heart rate zone, and body battery impact
-- **Training Readiness Status**: Real-time assessment combining HRV, body battery, sleep score, resting HR, and subjective energy levels
 - **MCP Support**: Exposes Garmin fetch functions as MCP tools for AI clients
 - **Smart Caching**: JSON files cache fetched data (delete cache files to refresh)
-- **Configurable Date Range**: Query parameter for months (default: 2)
-- **ME/CFS Research Focus**: All HR zones and body battery data for PEM threshold analysis
+- **Configurable Date Range**: Query parameter for weeks (default: 1)
+- **ME/CFS Research Focus**: All HR zones and daily body battery min/max for PEM threshold analysis
 
 ## Setup
 
@@ -70,40 +69,26 @@ This starts an MCP server over stdio with tools:
 - `fetch_daily_summary(date)`
 - `fetch_activities(start_date, end_date)`
 
-On first run, the API will fetch data from Garmin Connect with progress indicators. Subsequent runs use cached data from the SQLite database.
+On first run, the API will fetch data from Garmin Connect with progress indicators. Subsequent runs use cached JSON files.
 
 ### Fetch Data
 
-**Get last 3 months (default)**
+**Get last week (default)**
 
 ```bash
 curl http://127.0.0.1:5000/api/summary
 ```
 
-**Get last 6 months**
+**Get last 6 weeks**
 
 ```bash
-curl http://127.0.0.1:5000/api/summary?months=6
+curl http://127.0.0.1:5000/api/summary?weeks=6
 ```
-
-**Check training readiness status**
-
-```bash
-# Open in browser (recommended)
-open http://127.0.0.1:5000/api/status
-
-# With energy level
-open "http://127.0.0.1:5000/api/status?energy=7"
-```
-
-The `energy` parameter is optional. Without it, the endpoint shows guidance for where each energy level would place you.
-
-**Note:** The status endpoint returns an HTML page designed for viewing in a browser, not JSON.
 
 **Refresh data**
 
 ```bash
-rm cache/data.db
+rm cache/*.json
 curl http://127.0.0.1:5000/api/summary
 ```
 
@@ -115,7 +100,7 @@ Returns daily health summaries for the specified time period.
 
 **Parameters:**
 
-- `months` (optional, default: 2) - Number of months to fetch
+- `weeks` (optional, default: 1) - Number of weeks to fetch
 
 **Response:** See [Example JSON Response](#example-json-response) below.
 
@@ -125,57 +110,7 @@ Returns detailed activity data for the specified time period.
 
 **Parameters:**
 
-- `months` (optional, default: 2) - Number of months to fetch
-
-### `/api/status`
-
-**Returns:** HTML page (open in browser)
-
-Displays a visual "Morning Check" dashboard showing current training readiness status based on today's Garmin metrics and optionally your subjective energy level.
-
-**Parameters:**
-
-- `energy` (optional) - Subjective energy score from 1-10
-
-**Features:**
-
-- Beautiful, responsive HTML dashboard with color-coded metrics
-- Shows both **start-of-day Body Battery** (highest value) and **current Body Battery**
-- Only current Body Battery is used for status calculations
-- Each metric displays:
-  - Current value with status indicator (🟢 green, 🟡 yellow, 🔴 red)
-  - Threshold ranges for all three zones
-- Overall status banner with recommendation
-- Interactive energy level guidance
-
-**Usage:**
-
-1. **Without energy parameter:** Shows all metrics and asks for your energy level
-
-   ```
-   http://127.0.0.1:5000/api/status
-   ```
-
-2. **With energy parameter:** Shows personalized energy zone assessment
-   ```
-   http://127.0.0.1:5000/api/status?energy=7
-   ```
-
-**Status Colors:**
-
-- 🟢 **Green** (Training OK): Most metrics in healthy range
-- 🟡 **Yellow** (Light activity): Some metrics showing caution
-- 🔴 **Red** (Rest day): Two or more metrics in red zone
-
-**Metrics Evaluated:**
-
-| Metric               | 🟢 Green | 🟡 Yellow | 🔴 Red  |
-| -------------------- | -------- | --------- | ------- |
-| HRV                  | >62 ms   | 58-62 ms  | <58 ms  |
-| Body Battery (start) | >75      | 65-75     | <65     |
-| Sleep Score          | >75      | 70-75     | <70     |
-| Resting HR           | <48 bpm  | 48-50 bpm | >50 bpm |
-| Energy (subjective)  | 7-10/10  | 5-6/10    | 1-4/10  |
+- `weeks` (optional, default: 1) - Number of weeks to fetch
 
 ## MCP Tools
 
@@ -188,8 +123,6 @@ When running with `uv run app.py --mcp`, the server exposes:
   - Input: `start_date` and `end_date` in `YYYY-MM-DD`
   - Output: Activities payload with formatted durations/distances and `hr_zone_percentages`
 
-**Note:** Body Battery (current) is shown for reference but not used in status calculations.
-
 ## Example JSON Response
 
 ```json
@@ -197,15 +130,15 @@ When running with `uv run app.py --mcp`, the server exposes:
   "summaries": [
     {
       "date": "2025-10-26",
-      "steps": 8500,
-      "hrv_overnight_avg": 45,
-      "resting_hr": 55,
-      "max_hr": 160,
-      "body_battery_max": 100,
-      "body_battery_min": 34,
-      "sleep_duration": "7h 20m",
-      "sleep_score": 77,
-      "num_activities": 2
+      "totalSteps": 8500,
+      "hrvLastNightAvg": 45,
+      "restingHeartRate": 55,
+      "maxHeartRate": 160,
+      "bodyBatteryMax": 100,
+      "bodyBatteryMin": 34,
+      "sleepDuration": "7h 20m",
+      "sleepScore": 77,
+      "numberOfActivities": 2
     }
   ],
   "activities": [
@@ -235,15 +168,15 @@ When running with `uv run app.py --mcp`, the server exposes:
 ### Daily Summaries
 
 - `date`: Date in YYYY-MM-DD format
-- `steps`: Total steps for the day
-- `hrv_overnight_avg`: Overnight average heart rate variability (ms)
-- `resting_hr`: Average resting heart rate (bpm)
-- `max_hr`: Maximum heart rate during the day (bpm)
-- `body_battery_max`: Maximum body battery level (0-100)
-- `body_battery_min`: Minimum body battery level (0-100)
-- `sleep_duration`: Sleep duration (formatted as "Xh XXm")
-- `sleep_score`: Garmin sleep score (0-100)
-- `num_activities`: Number of activities recorded on this date
+- `totalSteps`: Total steps for the day
+- `hrvLastNightAvg`: Overnight average heart rate variability (ms)
+- `restingHeartRate`: Average resting heart rate (bpm)
+- `maxHeartRate`: Maximum heart rate during the day (bpm)
+- `bodyBatteryMax`: Maximum body battery level (0-100)
+- `bodyBatteryMin`: Minimum body battery level (0-100)
+- `sleepDuration`: Sleep duration (formatted as "Xh XXm")
+- `sleepScore`: Garmin sleep score (0-100)
+- `numberOfActivities`: Number of activities recorded on this date
 
 ### Activities
 
