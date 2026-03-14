@@ -368,7 +368,7 @@ def fetch_daily_summary(client, date_str):
         values = []
         if bb_data:
             for entry in bb_data:
-                values.extend(point[-1] for point in entry.get("bodyBatteryValuesArray", []) if point)
+                values.extend(point[-1] for point in entry.get("bodyBatteryValuesArray", []) if point and point[-1] is not None)
 
             if values:
                 summary["bodyBatteryMax"] = max(values)
