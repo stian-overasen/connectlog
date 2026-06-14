@@ -231,20 +231,30 @@ def get_garmin_client():
     client = Garmin()
     client.garth.loads(GARMIN_SESSION)
 
-    # Fetch user profile to set display name (prevents 403 errors)
-    client.display_name = client.get_full_name()
-    profile = client.get_user_profile()
-
+    # Set display_name — required to avoid 403s on user-scoped endpoints
+    display_name = None
     try:
-        client.display_name = client.get_full_name() or GARMIN_NAME
+        display_name = client.get_full_name()
     except Exception:
-        # Fallback to getting display name from user summary
+        pass
+
+    if not display_name:
         try:
             profile = client.get_user_profile()
-            client.display_name = profile.get("displayName") or profile.get("userName")
+            display_name = profile.get("displayName") or profile.get("userName")
         except Exception:
             pass
 
+    if not display_name:
+        display_name = GARMIN_NAME
+
+    if not display_name:
+        raise Exception(
+            "Could not determine Garmin display name. "
+            "Set GARMIN_NAME in your .env file (your Garmin Connect username)."
+        )
+
+    client.display_name = display_name
     return client
 
 
