@@ -12,7 +12,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from garminconnect import Garmin
-from tqdm import tqdm
 
 from credentials import KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, GarminSessionStorageError, MissingGarminSessionError, load_garmin_session_token
 
@@ -730,7 +729,7 @@ def create_mcp_server():
         fetched_summaries = {}
         if missing_dates:
             client = get_garmin_client()
-            for date_str in tqdm(missing_dates, desc="Daily summaries", unit="day"):
+            for date_str in missing_dates:
                 fetched_summaries[date_str] = fetch_daily_summary(client, date_str)
         else:
             client = None

@@ -85,7 +85,6 @@ Cache location is OS-specific and per-user:
 - Check JSON cache for existing data before Garmin calls
 - If cache exists, return immediately (no incremental updates)
 - If no cache, fetch all data from Garmin and save to JSON
-- Use tqdm progress bars for batch operations
 - Skip individual dates/activities on errors (partial data OK)
 
 ### Garmin Client Methods Used
@@ -175,12 +174,11 @@ When generating code for this project:
 
 1. **Use uv commands** not pip/python directly
 2. **Preserve all health data fields** - research depends on completeness
-3. **Add tqdm progress bars** for any loops over dates/activities
-4. **Handle API failures gracefully** - partial data is valuable
-5. **Update cache payload schema** if adding new data fields
-6. **Document all functions** with clear docstrings
-7. **Follow existing patterns** for consistency
-8. **Test locally** before committing
+3. **Handle API failures gracefully** - partial data is valuable
+4. **Update cache payload schema** if adding new data fields
+5. **Document all functions** with clear docstrings
+6. **Follow existing patterns** for consistency
+7. **Test locally** before committing
 
 ## Known Limitations
 
