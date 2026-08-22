@@ -457,19 +457,13 @@ def get_garmin_client():
     client = Garmin()
     client.garth.loads(garmin_session)
 
-    # Fetch user profile to set display name (prevents 403 errors)
-    client.display_name = client.get_full_name()
-    profile = client.get_user_profile()
-
-    try:
-        client.display_name = client.get_full_name()
-    except Exception:
-        # Fallback to getting display name from user summary
-        try:
-            profile = client.get_user_profile()
-            client.display_name = profile.get("displayName") or profile.get("userName")
-        except Exception:
-            pass
+    # garth.loads() restores tokens but skips login(), which is what normally
+    # populates display_name/full_name; fetch the profile directly instead,
+    # since per-user API paths 403 without a display_name.
+    profile = client.garth.profile
+    if isinstance(profile, dict):
+        client.display_name = profile.get("displayName")
+        client.full_name = profile.get("fullName")
 
     return client
 
