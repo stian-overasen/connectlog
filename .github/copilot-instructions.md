@@ -2,15 +2,15 @@
 
 ## Project Overview
 
-This is a Flask API that fetches Garmin Connect health data for ME/CFS (Myalgic Encephalomyelitis/Chronic Fatigue Syndrome) PEM (Post-Exertional Malaise) threshold research. The app retrieves daily health summaries and activity details to help identify safe exertion levels.
+This is an MCP server that fetches Garmin Connect health data for ME/CFS (Myalgic Encephalomyelitis/Chronic Fatigue Syndrome) PEM (Post-Exertional Malaise) threshold research. The app retrieves daily health summaries and activity details to help identify safe exertion levels.
 
 ## Technology Stack
 
 - **Language**: Python 3.14+
 - **Package Manager**: uv (NOT pip)
-- **Web Framework**: Flask
+- **Server Protocol**: MCP (Model Context Protocol) over stdio
 - **API Client**: garminconnect library
-- **Database**: SQLite (local caching)
+- **Cache Storage**: JSON files (local caching)
 - **Configuration**: python-dotenv for environment variables
 
 ## Code Style & Standards
@@ -40,7 +40,7 @@ This is a Flask API that fetches Garmin Connect health data for ME/CFS (Myalgic 
 
 ```
 connectlog/
-├── app.py              # Main Flask API with data fetchers and endpoints
+├── app.py              # Main MCP server with Garmin fetch tools
 ├── setup_oauth.py      # OAuth authentication script
 ├── pyproject.toml      # uv project configuration
 ├── .env.example        # Environment variable template
@@ -48,9 +48,6 @@ connectlog/
 ├── bin/
 │   ├── format.sh       # Code formatting script
 │   └── lint.sh         # Linting script
-├── cache/
-│   ├── summary-last-X-weeks.json     # Cached daily summaries (JSON)
-│   └── activities-last-X-weeks.json  # Cached activities (JSON)
 └── README.md           # Documentation
 ```
 
@@ -65,15 +62,20 @@ connectlog/
 
 ### Cache Storage
 
-Data is cached in JSON files (not SQLite database) for easy sharing:
+Data is cached in JSON files for easy sharing and deterministic date-range lookups.
+Cache location is OS-specific and per-user:
 
-**summary-last-X-weeks.json:**
+- macOS: `~/Library/Caches/connectlog`
+- Linux: `$XDG_CACHE_HOME/connectlog` or `~/.cache/connectlog`
+- Windows: `%LOCALAPPDATA%\\connectlog\\cache`
+
+**summary-YYYY-MM-DD-to-YYYY-MM-DD.json:**
 
 - date, restingHeartRate, maxHeartRate, hrvLastNightAvg
 - bodyBatteryMin, bodyBatteryMax
 - totalSteps, sleepDuration, sleepScore, numberOfActivities
 
-**activities-last-X-weeks.json:**
+**activities-YYYY-MM-DD-to-YYYY-MM-DD.json:**
 
 - datetime, activity_type, duration, distance
 - hr_zones (JSON array of time per zone)
@@ -81,14 +83,14 @@ Data is cached in JSON files (not SQLite database) for easy sharing:
 
 ### Data Fetching Strategy
 
-- Configurable date range via `?weeks=3` parameter
-- Check JSON cache for existing data before API calls
+- MCP tools take explicit date ranges (`start_date`, `end_date`) in YYYY-MM-DD
+- Check JSON cache for existing data before Garmin calls
 - If cache exists, return immediately (no incremental updates)
 - If no cache, fetch all data from Garmin and save to JSON
 - Use tqdm progress bars for batch operations
 - Skip individual dates/activities on errors (partial data OK)
 
-### Garmin API Endpoints Used
+### Garmin Client Methods Used
 
 - `client.get_stats(date)` - Daily resting/max HR, steps
 - `client.get_hrv_data(date)` - Heart rate variability
@@ -99,7 +101,7 @@ Data is cached in JSON files (not SQLite database) for easy sharing:
 
 ### Error Handling
 
-- Wrap all API calls in try-except blocks
+- Wrap Garmin calls in try-except blocks
 - Skip individual failures, continue processing
 - Return partial data when some requests fail
 - Log errors to console for debugging
@@ -127,14 +129,14 @@ This tool helps patients identify safe exertion thresholds by analyzing:
 uv sync
 ```
 
-### Adding a New API Endpoint
+### Adding a New MCP Tool
 
 ```python
-@app.route("/api/new-endpoint")
-def new_endpoint():
-    """Description of what this endpoint does."""
+@mcp.tool(name="new_tool")
+def new_tool(start_date, end_date):
+    """Description of what this tool does."""
     # Implementation
-    return jsonify({"data": result})
+    return {"data": result}
 ```
 
 ### Fetching New Garmin Data Type
@@ -153,21 +155,21 @@ def fetch_new_metric(client, date_str):
 ## Security Notes
 
 - Never commit `.env` file (contains OAuth token)
-- Never commit `cache/` directory (contains personal health data)
+- Never commit cached health data files
 - `.gitignore` is configured to exclude sensitive files
-- No authentication on API endpoints (local use only)
+- MCP server is local stdio by default; no HTTP endpoint exposure
 
 ## Testing
 
 - Test authentication: `uv run setup_oauth.py`
-- Test API: `curl http://127.0.0.1:5000/api/summary?weeks=1`
-- Clear cache: `rm cache/*.json` then re-fetch
+- Test MCP startup: `uv run app.py`
+- Clear cache in your OS cache directory, then re-fetch via MCP tool call
 
 ## Resources
 
 - [garminconnect documentation](https://github.com/cyberjunky/python-garminconnect)
 - [uv documentation](https://github.com/astral-sh/uv)
-- [Flask documentation](https://flask.palletsprojects.com/)
+- [MCP Python SDK documentation](https://github.com/modelcontextprotocol/python-sdk)
 
 ## Code Generation Guidelines
 
@@ -177,7 +179,7 @@ When generating code for this project:
 2. **Preserve all health data fields** - research depends on completeness
 3. **Add tqdm progress bars** for any loops over dates/activities
 4. **Handle API failures gracefully** - partial data is valuable
-5. **Update database schema** if adding new data fields
+5. **Update cache payload schema** if adding new data fields
 6. **Document all functions** with clear docstrings
 7. **Follow existing patterns** for consistency
 8. **Test locally** before committing
@@ -187,4 +189,4 @@ When generating code for this project:
 - Garmin API rate limits may slow initial data fetch
 - OAuth token expires after ~1 year (re-run setup_oauth.py)
 - Some Garmin metrics may not be available for all users
-- Database grows with more data (no automatic cleanup)
+- Cache directory grows over time (no automatic cleanup)

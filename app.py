@@ -1,39 +1,123 @@
 #!/usr/bin/env python3
 """
-Garmin Connect Log API
-Flask app to fetch and analyze Garmin Connect health data for ME/CFS PEM threshold research
+Garmin Connect Log MCP Server
+MCP server to fetch and analyze Garmin Connect health data for ME/CFS PEM threshold research
 """
 
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
-from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from dotenv import dotenv_values, find_dotenv, load_dotenv
 from garminconnect import Garmin
 from tqdm import tqdm
+
+from credentials import KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, GarminSessionStorageError, MissingGarminSessionError, load_garmin_session_token
 
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:
     FastMCP = None
 
-# Load environment variables
+PRELOAD_ENV = dict(os.environ)
+DOTENV_PATH = find_dotenv(usecwd=True)
+DOTENV_VALUES = dotenv_values(DOTENV_PATH) if DOTENV_PATH else {}
+
+# Load environment variables from .env without overriding process-level env vars.
 load_dotenv()
 
-app = Flask(__name__)
-app.json.sort_keys = False
+
+def log_warning(message):
+    """Write warnings to stderr so stdout stays valid for MCP JSON transport."""
+    print(message, file=sys.stderr, flush=True)
+
+
+def log_info(message):
+    """Write informational startup logs to stderr."""
+    print(message, file=sys.stderr, flush=True)
+
+
+def get_env_var_source(variable_name):
+    """Describe where an environment variable value was sourced from."""
+    in_preload_env = variable_name in PRELOAD_ENV
+    in_dotenv_file = variable_name in DOTENV_VALUES
+    in_current_env = variable_name in os.environ
+
+    dotenv_source = f".env ({DOTENV_PATH})" if DOTENV_PATH else ".env"
+
+    if in_preload_env and in_dotenv_file:
+        return "process environment (takes precedence over .env)"
+    if in_preload_env:
+        return "process environment"
+    if in_current_env and in_dotenv_file:
+        return dotenv_source
+    if in_current_env:
+        return "process environment (set during startup)"
+    if in_dotenv_file:
+        return f"{dotenv_source} (present but empty/unset)"
+    return "not set"
+
+
+def log_startup_configuration_sources():
+    """Log where key startup configuration values are loaded from."""
+    log_info("Configuration sources:")
+    if DOTENV_PATH:
+        log_info(f"  .env file: {DOTENV_PATH}")
+    else:
+        log_info("  .env file: not found")
+
+    log_info(f"  GARMIN_SESSION: OS keychain ({KEYCHAIN_SERVICE}/{KEYCHAIN_ACCOUNT})")
+    if "GARMIN_SESSION" in os.environ:
+        log_warning("  Warning: GARMIN_SESSION is set in environment but is ignored; keychain is used instead.")
+
+    try:
+        load_garmin_session_token()
+        log_info("  GARMIN_SESSION availability: keychain token found")
+    except MissingGarminSessionError:
+        log_warning("  GARMIN_SESSION availability: no token found in keychain")
+    except GarminSessionStorageError as exc:
+        log_warning(f"  GARMIN_SESSION availability: keychain access error: {exc}")
+
+    garmin_name = os.getenv("GARMIN_NAME")
+    garmin_name_source = get_env_var_source("GARMIN_NAME")
+    garmin_name_state = "set" if garmin_name else "unset"
+    log_info(f"  GARMIN_NAME: {garmin_name_source}; {garmin_name_state}")
+
+    overrides_path = os.getenv("HR_PROFILE_OVERRIDES_PATH")
+    overrides_source = get_env_var_source("HR_PROFILE_OVERRIDES_PATH")
+    overrides_state = "set" if overrides_path else "unset"
+    log_info(f"  HR_PROFILE_OVERRIDES_PATH: {overrides_source}; {overrides_state}")
+    if overrides_path:
+        resolved_overrides_path = Path(overrides_path).expanduser()
+        if not resolved_overrides_path.is_absolute():
+            resolved_overrides_path = Path.cwd() / resolved_overrides_path
+        log_info(f"    resolved path: {resolved_overrides_path}")
+        log_info(f"    file exists: {resolved_overrides_path.exists()}")
+
+
+def get_global_cache_dir():
+    """Resolve an OS-specific per-user cache directory for connectlog."""
+    if os.name == "nt":
+        base_cache_dir = Path(os.getenv("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        return base_cache_dir / "connectlog" / "cache"
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "connectlog"
+
+    base_cache_dir = Path(os.getenv("XDG_CACHE_HOME", str(Path.home() / ".cache")))
+    return base_cache_dir / "connectlog"
+
 
 # Configuration
-CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
-GARMIN_SESSION = os.getenv("GARMIN_SESSION")
+CACHE_DIR = get_global_cache_dir()
 GARMIN_NAME = os.getenv("GARMIN_NAME")
 HR_PROFILE_OVERRIDES_PATH = os.getenv("HR_PROFILE_OVERRIDES_PATH")
-DEFAULT_WEEKS = 1
 
 # Ensure cache directory exists
-os.makedirs(CACHE_DIR, exist_ok=True)
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 GARMIN_ZONE_RANGES = [
     {"label": "Zone 5", "min_percent": 90, "max_percent": 100},
@@ -62,6 +146,8 @@ SUMMARY_FIELD_RENAMES = {
     "sleep_score": "sleepScore",
 }
 
+CACHE_FILENAME_PATTERN = re.compile(r"^(summary|activities)-(\d{4}-\d{2}-\d{2})-to-(\d{4}-\d{2}-\d{2})\.json$")
+
 
 def parse_date_or_none(date_str, field_name):
     """Parse a YYYY-MM-DD string to a date or return None."""
@@ -79,14 +165,14 @@ def load_hr_profile_overrides():
         return []
 
     if not os.path.exists(HR_PROFILE_OVERRIDES_PATH):
-        print(f"Warning: HR_PROFILE_OVERRIDES_PATH not found: {HR_PROFILE_OVERRIDES_PATH}")
+        log_warning(f"Warning: HR_PROFILE_OVERRIDES_PATH not found: {HR_PROFILE_OVERRIDES_PATH}")
         return []
 
     try:
         with open(HR_PROFILE_OVERRIDES_PATH) as f:
             raw_overrides = json.load(f)
     except Exception as exc:
-        print(f"Warning: Failed to load HR profile overrides: {exc}")
+        log_warning(f"Warning: Failed to load HR profile overrides: {exc}")
         return []
 
     overrides = []
@@ -188,48 +274,242 @@ def format_hr_zones_with_labels(zones, zone_scheme):
     return formatted_zones
 
 
-def get_cache_filename(data_type, weeks):
-    """Get cache filename for specified data type and weeks."""
-    return os.path.join(CACHE_DIR, f"{data_type}-last-{weeks}-weeks.json")
+def get_cache_filename(data_type, start_date, end_date):
+    """Get cache filename for specified data type and date range."""
+    return CACHE_DIR / f"{data_type}-{start_date}-to-{end_date}.json"
 
 
-def load_cache(data_type, weeks):
-    """Load cached data from JSON file."""
-    cache_file = get_cache_filename(data_type, weeks)
-    if os.path.exists(cache_file):
+def list_cache_files(data_type):
+    """List cache files for a data type with parsed date ranges."""
+    cache_files = []
+    for cache_file in CACHE_DIR.glob(f"{data_type}-*-to-*.json"):
+        match = CACHE_FILENAME_PATTERN.match(cache_file.name)
+        if not match:
+            continue
+
+        matched_data_type, start_date_str, end_date_str = match.groups()
+        if matched_data_type != data_type:
+            continue
+
         try:
-            with open(cache_file) as f:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+
+        if start_date > end_date:
+            continue
+
+        cache_files.append(
+            {
+                "path": cache_file,
+                "start_date": start_date,
+                "end_date": end_date,
+                "start_date_str": start_date_str,
+                "end_date_str": end_date_str,
+            }
+        )
+
+    return cache_files
+
+
+def ranges_overlap(start_date_a, end_date_a, start_date_b, end_date_b):
+    """Return True if two inclusive date ranges overlap."""
+    return start_date_a <= end_date_b and start_date_b <= end_date_a
+
+
+def build_dates_in_range(start_date, end_date):
+    """Build ascending date list for an inclusive range."""
+    dates = []
+    current = start_date
+    while current <= end_date:
+        dates.append(current)
+        current += timedelta(days=1)
+    return dates
+
+
+def build_descending_date_strings(start_date, end_date):
+    """Build descending YYYY-MM-DD date strings for an inclusive range."""
+    date_strings = []
+    current = end_date
+    while current >= start_date:
+        date_strings.append(current.strftime("%Y-%m-%d"))
+        current -= timedelta(days=1)
+    return date_strings
+
+
+def dates_to_ranges(dates):
+    """Convert sorted unique dates to contiguous inclusive ranges."""
+    if not dates:
+        return []
+
+    sorted_dates = sorted(set(dates))
+    ranges = []
+    range_start = sorted_dates[0]
+    range_end = sorted_dates[0]
+
+    for day in sorted_dates[1:]:
+        if day == range_end + timedelta(days=1):
+            range_end = day
+            continue
+
+        ranges.append((range_start, range_end))
+        range_start = day
+        range_end = day
+
+    ranges.append((range_start, range_end))
+    return ranges
+
+
+def get_uncovered_dates(start_date, end_date, cached_ranges):
+    """Get dates in a request range not covered by any cached range."""
+    requested_dates = build_dates_in_range(start_date, end_date)
+    uncovered = []
+
+    for date_value in requested_dates:
+        covered = any(range_start <= date_value <= range_end for range_start, range_end in cached_ranges)
+        if not covered:
+            uncovered.append(date_value)
+
+    return uncovered
+
+
+def load_cached_summaries_map(start_date, end_date):
+    """Load cached summaries for overlapping cache files mapped by date."""
+    summary_by_date = {}
+
+    for cache_info in list_cache_files("summary"):
+        if not ranges_overlap(start_date, end_date, cache_info["start_date"], cache_info["end_date"]):
+            continue
+
+        payload = load_cache("summary", cache_info["start_date_str"], cache_info["end_date_str"])
+        if not isinstance(payload, dict):
+            continue
+
+        summaries = payload.get("summaries")
+        if not isinstance(summaries, list):
+            continue
+
+        for summary in summaries:
+            if not isinstance(summary, dict):
+                continue
+
+            date_str = summary.get("date")
+            if not isinstance(date_str, str):
+                continue
+
+            try:
+                date_value = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+
+            if not (start_date <= date_value <= end_date):
+                continue
+
+            summary_by_date.setdefault(date_str, normalize_summary_field_names(summary))
+
+    return summary_by_date
+
+
+def get_activity_date(activity):
+    """Extract activity date from activity payload."""
+    datetime_str = activity.get("datetime", "") if isinstance(activity, dict) else ""
+    if not datetime_str:
+        return None
+
+    date_part = datetime_str.split()[0] if " " in datetime_str else datetime_str[:10]
+    try:
+        return datetime.strptime(date_part, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def load_cached_activities(start_date, end_date):
+    """Load cached activities and covered ranges for overlapping cache files."""
+    cached_activities = []
+    covered_ranges = []
+    seen_keys = set()
+
+    for cache_info in list_cache_files("activities"):
+        if not ranges_overlap(start_date, end_date, cache_info["start_date"], cache_info["end_date"]):
+            continue
+
+        overlap_start = max(start_date, cache_info["start_date"])
+        overlap_end = min(end_date, cache_info["end_date"])
+        covered_ranges.append((overlap_start, overlap_end))
+
+        payload = load_cache("activities", cache_info["start_date_str"], cache_info["end_date_str"])
+        if not isinstance(payload, dict):
+            continue
+
+        activities = payload.get("activities")
+        if not isinstance(activities, list):
+            continue
+
+        for activity in activities:
+            if not isinstance(activity, dict):
+                continue
+
+            activity_date = get_activity_date(activity)
+            if activity_date is None or not (start_date <= activity_date <= end_date):
+                continue
+
+            key = (
+                activity.get("datetime"),
+                activity.get("activity_type"),
+                activity.get("duration"),
+                activity.get("distance"),
+            )
+            if key in seen_keys:
+                continue
+
+            seen_keys.add(key)
+            cached_activities.append(activity)
+
+    return cached_activities, covered_ranges
+
+
+def load_cache(data_type, start_date, end_date):
+    """Load cached data from JSON file."""
+    cache_file = get_cache_filename(data_type, start_date, end_date)
+    if cache_file.exists():
+        try:
+            with cache_file.open() as f:
                 cached_data = json.load(f)
 
             if data_type == "summary":
                 normalized_data = normalize_summary_cache_payload(cached_data)
                 if normalized_data != cached_data:
-                    save_cache(data_type, weeks, normalized_data)
+                    save_cache(data_type, start_date, end_date, normalized_data)
                 return normalized_data
 
             return cached_data
         except Exception as e:
-            print(f"Warning: Failed to load cache from {cache_file}: {e}")
+            log_warning(f"Warning: Failed to load cache from {cache_file}: {e}")
     return None
 
 
-def save_cache(data_type, weeks, data):
+def save_cache(data_type, start_date, end_date, data):
     """Save data to JSON cache file."""
-    cache_file = get_cache_filename(data_type, weeks)
+    cache_file = get_cache_filename(data_type, start_date, end_date)
     try:
-        with open(cache_file, "w") as f:
+        with cache_file.open("w") as f:
             json.dump(data, f, indent=2)
     except Exception as e:
-        print(f"Warning: Failed to save cache to {cache_file}: {e}")
+        log_warning(f"Warning: Failed to save cache to {cache_file}: {e}")
 
 
 def get_garmin_client():
     """Create and authenticate Garmin Connect client."""
-    if not GARMIN_SESSION:
-        raise Exception("GARMIN_SESSION not found in .env file. Run setup_oauth.py first.")
+    try:
+        garmin_session = load_garmin_session_token()
+    except MissingGarminSessionError as exc:
+        raise Exception("GARMIN_SESSION not found in OS keychain. Run setup_oauth.py first.") from exc
+    except GarminSessionStorageError as exc:
+        raise Exception(f"Failed to load GARMIN_SESSION from OS keychain: {exc}") from exc
 
     client = Garmin()
-    client.garth.loads(GARMIN_SESSION)
+    client.garth.loads(garmin_session)
 
     # Fetch user profile to set display name (prevents 403 errors)
     client.display_name = client.get_full_name()
@@ -278,28 +558,6 @@ def parse_required_date(date_str, field_name):
     if parsed is None:
         raise ValueError(f"Missing required {field_name}. Expected YYYY-MM-DD.")
     return parsed
-
-
-def parse_positive_int_query_param(name, default):
-    """Parse a positive integer query parameter from the current request."""
-    raw_value = request.args.get(name, str(default))
-
-    try:
-        value = int(raw_value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a positive integer.") from exc
-
-    if value < 1:
-        raise ValueError(f"{name} must be a positive integer.")
-
-    return value
-
-
-def get_date_range_for_weeks(weeks):
-    """Get an inclusive date range covering the requested number of weeks."""
-    end_date = datetime.now().date()
-    start_date = end_date - timedelta(days=(weeks * 7) - 1)
-    return start_date, end_date
 
 
 def normalize_summary_field_names(summary):
@@ -351,7 +609,7 @@ def fetch_daily_summary(client, date_str):
             summary["restingHeartRate"] = stats.get("restingHeartRate")
             summary["maxHeartRate"] = stats.get("maxHeartRate")
     except Exception as e:
-        print(f"  Warning: Failed to get stats for {date_str}: {e}")
+        log_warning(f"  Warning: Failed to get stats for {date_str}: {e}")
 
     try:
         # Get HRV data
@@ -359,7 +617,7 @@ def fetch_daily_summary(client, date_str):
         if hrv_data and "hrvSummary" in hrv_data:
             summary["hrvLastNightAvg"] = hrv_data["hrvSummary"].get("lastNightAvg")
     except Exception as e:
-        print(f"  Warning: Failed to get HRV for {date_str}: {e}")
+        log_warning(f"  Warning: Failed to get HRV for {date_str}: {e}")
 
     try:
         # Get Body Battery hourly data
@@ -374,7 +632,7 @@ def fetch_daily_summary(client, date_str):
                 summary["bodyBatteryMax"] = max(values)
                 summary["bodyBatteryMin"] = min(values)
     except Exception as e:
-        print(f"  Warning: Failed to get Body Battery for {date_str}: {e}")
+        log_warning(f"  Warning: Failed to get Body Battery for {date_str}: {e}")
 
     try:
         # Get sleep data
@@ -384,7 +642,7 @@ def fetch_daily_summary(client, date_str):
             summary["sleepDuration"] = sleep.get("sleepTimeSeconds")
             summary["sleepScore"] = sleep.get("sleepScores", {}).get("overall", {}).get("value")
     except Exception as e:
-        print(f"  Warning: Failed to get sleep data for {date_str}: {e}")
+        log_warning(f"  Warning: Failed to get sleep data for {date_str}: {e}")
 
     return summary
 
@@ -441,7 +699,7 @@ def fetch_activities(client, start_date, end_date):
             )
 
     except Exception as e:
-        print(f"  Warning: Failed to get activities: {e}")
+        log_warning(f"  Warning: Failed to get activities: {e}")
 
     return activities
 
@@ -497,8 +755,89 @@ def create_mcp_server():
             date: Date in YYYY-MM-DD format.
         """
         parsed_date = parse_required_date(date, "date")
+        cached_summaries = load_cached_summaries_map(parsed_date, parsed_date)
+        cached_summary = cached_summaries.get(parsed_date.strftime("%Y-%m-%d"))
+        if cached_summary:
+            return cached_summary
+
         client = get_garmin_client()
         return fetch_daily_summary(client, parsed_date.strftime("%Y-%m-%d"))
+
+    @mcp.tool(name="fetch_daily_summaries")
+    def mcp_fetch_daily_summaries(start_date, end_date):
+        """Fetch Garmin daily summaries for a date range.
+
+        Args:
+            start_date: Start date in YYYY-MM-DD format.
+            end_date: End date in YYYY-MM-DD format.
+        """
+        parsed_start = parse_required_date(start_date, "start_date")
+        parsed_end = parse_required_date(end_date, "end_date")
+        if parsed_start > parsed_end:
+            raise ValueError("start_date must be before or equal to end_date.")
+
+        start_date_str = parsed_start.strftime("%Y-%m-%d")
+        end_date_str = parsed_end.strftime("%Y-%m-%d")
+
+        cached_data = load_cache("summary", start_date_str, end_date_str)
+        if cached_data:
+            return cached_data
+
+        all_dates = build_descending_date_strings(parsed_start, parsed_end)
+        cached_summaries = load_cached_summaries_map(parsed_start, parsed_end)
+        missing_dates = [date_str for date_str in all_dates if date_str not in cached_summaries]
+
+        fetched_summaries = {}
+        if missing_dates:
+            client = get_garmin_client()
+            for date_str in tqdm(missing_dates, desc="Daily summaries", unit="day"):
+                fetched_summaries[date_str] = fetch_daily_summary(client, date_str)
+        else:
+            client = None
+
+        daily_summaries = [cached_summaries.get(date_str) or fetched_summaries.get(date_str) for date_str in all_dates]
+        daily_summaries = [summary for summary in daily_summaries if summary is not None]
+
+        cached_activities, covered_ranges = load_cached_activities(parsed_start, parsed_end)
+        missing_activity_dates = get_uncovered_dates(parsed_start, parsed_end, covered_ranges)
+
+        fetched_activities = []
+        if missing_activity_dates:
+            if client is None:
+                client = get_garmin_client()
+            for range_start, range_end in dates_to_ranges(missing_activity_dates):
+                fetched_activities.extend(
+                    fetch_activities(
+                        client=client,
+                        start_date=range_start.strftime("%Y-%m-%d"),
+                        end_date=range_end.strftime("%Y-%m-%d"),
+                    )
+                )
+
+        combined_activities = cached_activities + fetched_activities
+        deduped_activities = []
+        seen_activity_keys = set()
+        for activity in combined_activities:
+            key = (
+                activity.get("datetime"),
+                activity.get("activity_type"),
+                activity.get("duration"),
+                activity.get("distance"),
+            )
+            if key in seen_activity_keys:
+                continue
+            seen_activity_keys.add(key)
+            deduped_activities.append(activity)
+
+        activities = deduped_activities
+        activity_counts = count_activities_by_date(activities)
+
+        for summary in daily_summaries:
+            summary["numberOfActivities"] = activity_counts.get(summary["date"], 0)
+
+        response_data = {"summaries": format_summaries_for_output(daily_summaries)}
+        save_cache("summary", start_date_str, end_date_str, response_data)
+        return response_data
 
     @mcp.tool(name="fetch_activities")
     def mcp_fetch_activities(start_date, end_date):
@@ -513,184 +852,77 @@ def create_mcp_server():
         if parsed_start > parsed_end:
             raise ValueError("start_date must be before or equal to end_date.")
 
-        activities = fetch_activities(
-            client=get_garmin_client(),
-            start_date=parsed_start.strftime("%Y-%m-%d"),
-            end_date=parsed_end.strftime("%Y-%m-%d"),
-        )
-        return {
-            "activities": format_activities_for_output(activities),
+        start_date_str = parsed_start.strftime("%Y-%m-%d")
+        end_date_str = parsed_end.strftime("%Y-%m-%d")
+
+        cached_data = load_cache("activities", start_date_str, end_date_str)
+        if cached_data:
+            return cached_data
+
+        cached_activities, covered_ranges = load_cached_activities(parsed_start, parsed_end)
+        missing_activity_dates = get_uncovered_dates(parsed_start, parsed_end, covered_ranges)
+
+        fetched_activities = []
+        if missing_activity_dates:
+            client = get_garmin_client()
+            for range_start, range_end in dates_to_ranges(missing_activity_dates):
+                fetched_activities.extend(
+                    fetch_activities(
+                        client=client,
+                        start_date=range_start.strftime("%Y-%m-%d"),
+                        end_date=range_end.strftime("%Y-%m-%d"),
+                    )
+                )
+
+        formatted_cached_activities = []
+        for activity in cached_activities:
+            if isinstance(activity.get("duration"), str) and isinstance(activity.get("distance"), str):
+                formatted_cached_activities.append(activity)
+            else:
+                formatted_cached_activities.append(format_activities_for_output([activity])[0])
+
+        formatted_fetched_activities = format_activities_for_output(fetched_activities)
+
+        activities = []
+        seen_activity_keys = set()
+        for activity in formatted_cached_activities + formatted_fetched_activities:
+            key = (
+                activity.get("datetime"),
+                activity.get("activity_type"),
+                activity.get("duration"),
+                activity.get("distance"),
+            )
+            if key in seen_activity_keys:
+                continue
+            seen_activity_keys.add(key)
+            activities.append(activity)
+
+        response_data = {
+            "activities": activities,
             "hr_zone_percentages": {
                 "garmin": GARMIN_ZONE_RANGES,
                 "olympiatoppen": OLYMPIATOPPEN_ZONE_RANGES,
             },
         }
+        save_cache("activities", start_date_str, end_date_str, response_data)
+        return response_data
 
     return mcp
-
-
-def run_flask_server():
-    """Run Flask API server."""
-    print("Garmin Connect Log API")
-    print("=" * 50)
-    print("Starting Flask server on http://127.0.0.1:5000")
-    print("API endpoints:")
-    print("  /api/summary - Daily health summaries (JSON)")
-    print("  /api/activities - Activities (JSON)")
-    print("Parameters:")
-    print(f"  weeks={DEFAULT_WEEKS} (default for summary/activities)")
-    print()
-    app.run(debug=True, port=5000)
 
 
 def run_mcp_server():
     """Run MCP server exposing Garmin fetch tools over stdio."""
     mcp_server = create_mcp_server()
-    print("Garmin Connect Log MCP server")
-    print("=" * 50)
-    print("Starting MCP server over stdio")
-    print("Tools:")
-    print("  fetch_daily_summary(date)")
-    print("  fetch_activities(start_date, end_date)")
+    log_info("Garmin Connect Log MCP server")
+    log_info("=" * 50)
+    log_info("Starting MCP server over stdio")
+    log_startup_configuration_sources()
+    log_info("Tools:")
+    log_info("  fetch_daily_summary(date)")
+    log_info("  fetch_daily_summaries(start_date, end_date)")
+    log_info("  fetch_activities(start_date, end_date)")
     mcp_server.run()
 
 
-@app.route("/")
-def index():
-    """API documentation endpoint."""
-    return jsonify(
-        {
-            "name": "Garmin Connect Log API",
-            "description": "Fetch Garmin Connect health data for ME/CFS PEM threshold research",
-            "endpoints": {
-                "/api/summary": {
-                    "method": "GET",
-                    "parameters": {
-                        "weeks": f"Number of weeks to fetch (default: {DEFAULT_WEEKS})",
-                    },
-                    "description": "Get daily health summaries for specified period",
-                },
-                "/api/activities": {
-                    "method": "GET",
-                    "parameters": {
-                        "weeks": f"Number of weeks to fetch (default: {DEFAULT_WEEKS})",
-                    },
-                    "description": "Get activities for specified period",
-                },
-            },
-        }
-    )
-
-
-@app.route("/api/summary")
-def api_summary():
-    """Get daily health summaries for specified period."""
-    try:
-        weeks = parse_positive_int_query_param("weeks", DEFAULT_WEEKS)
-        start_date, end_date = get_date_range_for_weeks(weeks)
-        start_date_str = start_date.strftime("%Y-%m-%d")
-        end_date_str = end_date.strftime("%Y-%m-%d")
-
-        print(f"Fetching summaries from {start_date_str} to {end_date_str}...")
-
-        # Try to load from cache
-        cached_data = load_cache("summary", weeks)
-
-        if cached_data:
-            print(f"✓ Loaded summaries from cache (summary-last-{weeks}-weeks.json)")
-            return jsonify(cached_data)
-
-        # Generate all dates in range
-        all_dates = []
-        current = end_date
-        while current >= start_date:
-            all_dates.append(current.strftime("%Y-%m-%d"))
-            current -= timedelta(days=1)
-
-        # Fetch daily summaries from Garmin
-        print(f"Fetching {len(all_dates)} days from Garmin Connect...")
-        client = get_garmin_client()
-
-        daily_summaries = []
-        for date_str in tqdm(all_dates, desc="Daily summaries", unit="day"):
-            summary = fetch_daily_summary(client, date_str)
-            daily_summaries.append(summary)
-
-        # Fetch activities and count per date
-        print("Fetching activities to count per day...")
-        activities = fetch_activities(client, start_date_str, end_date_str)
-        activity_counts = count_activities_by_date(activities)
-
-        # Add activity counts to summaries
-        for summary in daily_summaries:
-            summary["numberOfActivities"] = activity_counts.get(summary["date"], 0)
-
-        # Prepare response data
-        response_data = {
-            "summaries": format_summaries_for_output(daily_summaries),
-        }
-
-        # Save to cache
-        save_cache("summary", weeks, response_data)
-        print(f"✓ Summaries cached to summary-last-{weeks}-weeks.json")
-
-        return jsonify(response_data)
-
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        print(f"Error fetching summaries from Garmin: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/activities")
-def api_activities():
-    """Get activities for specified period."""
-    try:
-        weeks = parse_positive_int_query_param("weeks", DEFAULT_WEEKS)
-        start_date, end_date = get_date_range_for_weeks(weeks)
-        start_date_str = start_date.strftime("%Y-%m-%d")
-        end_date_str = end_date.strftime("%Y-%m-%d")
-
-        print(f"Fetching activities from {start_date_str} to {end_date_str}...")
-
-        # Try to load from cache
-        cached_data = load_cache("activities", weeks)
-
-        if cached_data:
-            print(f"✓ Loaded activities from cache (activities-last-{weeks}-weeks.json)")
-            return jsonify(cached_data)
-
-        # Fetch activities from Garmin
-        print("Fetching activities from Garmin Connect...")
-        client = get_garmin_client()
-
-        activities = fetch_activities(client, start_date_str, end_date_str)
-
-        # Prepare response data
-        response_data = {
-            "activities": format_activities_for_output(activities),
-            "hr_zone_percentages": {
-                "garmin": GARMIN_ZONE_RANGES,
-                "olympiatoppen": OLYMPIATOPPEN_ZONE_RANGES,
-            },
-        }
-
-        # Save to cache
-        save_cache("activities", weeks, response_data)
-        print(f"✓ Activities cached to activities-last-{weeks}-weeks.json")
-
-        return jsonify(response_data)
-
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        print(f"Error fetching activities from Garmin: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
 if __name__ == "__main__":
-    if "--mcp" in sys.argv:
-        run_mcp_server()
-    else:
-        run_flask_server()
+    run_mcp_server()

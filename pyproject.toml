@@ -1,12 +1,12 @@
 [project]
 name = "connectlog"
 version = "0.1.0"
-description = "Flask API to fetch Garmin Connect health data for ME/CFS PEM threshold research"
+description = "MCP server to fetch Garmin Connect health data for ME/CFS PEM threshold research"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "flask",
     "garminconnect",
+    "keyring",
     "mcp",
     "python-dotenv",
     "tqdm",
