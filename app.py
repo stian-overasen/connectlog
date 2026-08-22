@@ -11,7 +11,6 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from dotenv import dotenv_values, find_dotenv, load_dotenv
 from garminconnect import Garmin
 from tqdm import tqdm
 
@@ -21,13 +20,6 @@ try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:
     FastMCP = None
-
-PRELOAD_ENV = dict(os.environ)
-DOTENV_PATH = find_dotenv(usecwd=True)
-DOTENV_VALUES = dotenv_values(DOTENV_PATH) if DOTENV_PATH else {}
-
-# Load environment variables from .env without overriding process-level env vars.
-load_dotenv()
 
 
 def log_warning(message):
@@ -40,38 +32,10 @@ def log_info(message):
     print(message, file=sys.stderr, flush=True)
 
 
-def get_env_var_source(variable_name):
-    """Describe where an environment variable value was sourced from."""
-    in_preload_env = variable_name in PRELOAD_ENV
-    in_dotenv_file = variable_name in DOTENV_VALUES
-    in_current_env = variable_name in os.environ
-
-    dotenv_source = f".env ({DOTENV_PATH})" if DOTENV_PATH else ".env"
-
-    if in_preload_env and in_dotenv_file:
-        return "process environment (takes precedence over .env)"
-    if in_preload_env:
-        return "process environment"
-    if in_current_env and in_dotenv_file:
-        return dotenv_source
-    if in_current_env:
-        return "process environment (set during startup)"
-    if in_dotenv_file:
-        return f"{dotenv_source} (present but empty/unset)"
-    return "not set"
-
-
 def log_startup_configuration_sources():
     """Log where key startup configuration values are loaded from."""
     log_info("Configuration sources:")
-    if DOTENV_PATH:
-        log_info(f"  .env file: {DOTENV_PATH}")
-    else:
-        log_info("  .env file: not found")
-
     log_info(f"  GARMIN_SESSION: OS keychain ({KEYCHAIN_SERVICE}/{KEYCHAIN_ACCOUNT})")
-    if "GARMIN_SESSION" in os.environ:
-        log_warning("  Warning: GARMIN_SESSION is set in environment but is ignored; keychain is used instead.")
 
     try:
         load_garmin_session_token()
@@ -81,21 +45,8 @@ def log_startup_configuration_sources():
     except GarminSessionStorageError as exc:
         log_warning(f"  GARMIN_SESSION availability: keychain access error: {exc}")
 
-    garmin_name = os.getenv("GARMIN_NAME")
-    garmin_name_source = get_env_var_source("GARMIN_NAME")
-    garmin_name_state = "set" if garmin_name else "unset"
-    log_info(f"  GARMIN_NAME: {garmin_name_source}; {garmin_name_state}")
-
-    overrides_path = os.getenv("HR_PROFILE_OVERRIDES_PATH")
-    overrides_source = get_env_var_source("HR_PROFILE_OVERRIDES_PATH")
-    overrides_state = "set" if overrides_path else "unset"
-    log_info(f"  HR_PROFILE_OVERRIDES_PATH: {overrides_source}; {overrides_state}")
-    if overrides_path:
-        resolved_overrides_path = Path(overrides_path).expanduser()
-        if not resolved_overrides_path.is_absolute():
-            resolved_overrides_path = Path.cwd() / resolved_overrides_path
-        log_info(f"    resolved path: {resolved_overrides_path}")
-        log_info(f"    file exists: {resolved_overrides_path.exists()}")
+    log_info(f"  HR profile overrides: {HR_PROFILES_PATH}")
+    log_info(f"    file exists: {HR_PROFILES_PATH.exists()}")
 
 
 def get_global_cache_dir():
@@ -113,8 +64,7 @@ def get_global_cache_dir():
 
 # Configuration
 CACHE_DIR = get_global_cache_dir()
-GARMIN_NAME = os.getenv("GARMIN_NAME")
-HR_PROFILE_OVERRIDES_PATH = os.getenv("HR_PROFILE_OVERRIDES_PATH")
+HR_PROFILES_PATH = Path(__file__).resolve().parent / "hr_profiles.json"
 
 # Ensure cache directory exists
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -160,16 +110,12 @@ def parse_date_or_none(date_str, field_name):
 
 
 def load_hr_profile_overrides():
-    """Load HR profile overrides from JSON file specified by HR_PROFILE_OVERRIDES_PATH."""
-    if not HR_PROFILE_OVERRIDES_PATH:
-        return []
-
-    if not os.path.exists(HR_PROFILE_OVERRIDES_PATH):
-        log_warning(f"Warning: HR_PROFILE_OVERRIDES_PATH not found: {HR_PROFILE_OVERRIDES_PATH}")
+    """Load HR profile overrides from hr_profiles.json if present, else fall back to defaults."""
+    if not HR_PROFILES_PATH.exists():
         return []
 
     try:
-        with open(HR_PROFILE_OVERRIDES_PATH) as f:
+        with HR_PROFILES_PATH.open() as f:
             raw_overrides = json.load(f)
     except Exception as exc:
         log_warning(f"Warning: Failed to load HR profile overrides: {exc}")
@@ -516,7 +462,7 @@ def get_garmin_client():
     profile = client.get_user_profile()
 
     try:
-        client.display_name = client.get_full_name() or GARMIN_NAME
+        client.display_name = client.get_full_name()
     except Exception:
         # Fallback to getting display name from user summary
         try:

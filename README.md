@@ -39,9 +39,9 @@ uv sync
 uv run setup_oauth.py
 ```
 
-This stores your Garmin session token in your OS keychain (not in `.env`).
+This stores your Garmin session token in your OS keychain.
 
-4. Optional: configure date-based HR profile overrides using [hr_profiles.example.json](hr_profiles.example.json) and set HR_PROFILE_OVERRIDES_PATH in .env.
+4. Optional: configure date-based HR profile overrides by copying [hr_profiles.example.json](hr_profiles.example.json) to `hr_profiles.json` in the project root. If the file is missing, default Garmin zones are used.
 
 ## Running
 
@@ -126,7 +126,6 @@ connectlog/
 ├── setup_oauth.py
 ├── pyproject.toml
 ├── hr_profiles.example.json
-├── .env.example
 ├── bin/
 │   ├── format.sh
 │   └── lint.sh

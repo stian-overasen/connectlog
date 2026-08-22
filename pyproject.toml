@@ -8,7 +8,6 @@ dependencies = [
     "garminconnect",
     "keyring",
     "mcp",
-    "python-dotenv",
     "tqdm",
 ]
 

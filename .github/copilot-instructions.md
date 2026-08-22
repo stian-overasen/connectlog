@@ -11,7 +11,7 @@ This is an MCP server that fetches Garmin Connect health data for ME/CFS (Myalgi
 - **Server Protocol**: MCP (Model Context Protocol) over stdio
 - **API Client**: garminconnect library
 - **Cache Storage**: JSON files (local caching)
-- **Configuration**: python-dotenv for environment variables
+- **Configuration**: none required; optional `hr_profiles.json` in project root for HR zone overrides
 
 ## Code Style & Standards
 
@@ -43,8 +43,7 @@ connectlog/
 ├── app.py              # Main MCP server with Garmin fetch tools
 ├── setup_oauth.py      # OAuth authentication script
 ├── pyproject.toml      # uv project configuration
-├── .env.example        # Environment variable template
-├── .env                # OAuth session token (gitignored)
+├── hr_profiles.json    # Optional HR zone overrides (gitignored)
 ├── bin/
 │   ├── format.sh       # Code formatting script
 │   └── lint.sh         # Linting script
@@ -56,9 +55,8 @@ connectlog/
 ### Authentication
 
 - Uses Garmin Connect OAuth via `garminconnect` library
-- Session token stored in `.env` file (valid ~1 year)
+- Session token stored in the OS keychain (valid ~1 year), via [credentials.py](../credentials.py)
 - Run `uv run setup_oauth.py` to generate token
-- Never commit `.env` file
 
 ### Cache Storage
 
@@ -154,7 +152,7 @@ def fetch_new_metric(client, date_str):
 
 ## Security Notes
 
-- Never commit `.env` file (contains OAuth token)
+- Never commit the OAuth token; it lives in the OS keychain, not the repo
 - Never commit cached health data files
 - `.gitignore` is configured to exclude sensitive files
 - MCP server is local stdio by default; no HTTP endpoint exposure

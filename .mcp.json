@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "connectlog": {
+      "command": "uv",
+      "args": ["run", "--project", ".", "app.py"]
+    }
+  }
+}
