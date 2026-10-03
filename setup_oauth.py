@@ -4,6 +4,7 @@ Garmin Connect OAuth Setup
 Authenticates with Garmin Connect and saves session token to OS keychain
 """
 
+import sys
 from getpass import getpass
 
 from garminconnect import Garmin
@@ -36,7 +37,7 @@ def setup_oauth():
 
         print("\n✓ Authentication successful!")
         print("✓ Session token saved to OS keychain (service: connectlog, account: garmin_session)")
-        print("\nYou can now run the MCP server with: uv run app.py")
+        print("\nYou can now start the MCP server from your MCP client.")
 
     except GarminSessionStorageError as e:
         print(f"\n✗ Authentication succeeded, but failed to store token: {e}")
@@ -51,5 +52,10 @@ def setup_oauth():
     return True
 
 
+def main():
+    """Console script entry point."""
+    sys.exit(0 if setup_oauth() else 1)
+
+
 if __name__ == "__main__":
-    setup_oauth()
+    main()

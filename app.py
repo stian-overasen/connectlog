@@ -44,8 +44,8 @@ def log_startup_configuration_sources():
     except GarminSessionStorageError as exc:
         log_warning(f"  GARMIN_SESSION availability: keychain access error: {exc}")
 
-    log_info(f"  HR profile overrides: {HR_PROFILES_PATH}")
-    log_info(f"    file exists: {HR_PROFILES_PATH.exists()}")
+    log_info(f"  Config file: {CONFIG_PATH}")
+    log_info(f"    file exists: {CONFIG_PATH.exists()}")
 
 
 def get_global_cache_dir():
@@ -63,7 +63,7 @@ def get_global_cache_dir():
 
 # Configuration
 CACHE_DIR = get_global_cache_dir()
-HR_PROFILES_PATH = Path(__file__).resolve().parent / "hr_profiles.json"
+CONFIG_PATH = Path.home() / ".connectlog.json"
 
 # Ensure cache directory exists
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -122,15 +122,15 @@ def parse_date_or_none(date_str, field_name):
 
 
 def load_hr_profile_overrides():
-    """Load HR profile overrides from hr_profiles.json if present, else fall back to defaults."""
-    if not HR_PROFILES_PATH.exists():
+    """Load HR profile overrides from the config file if present, else fall back to defaults."""
+    if not CONFIG_PATH.exists():
         return []
 
     try:
-        with HR_PROFILES_PATH.open() as f:
-            raw_overrides = json.load(f)
+        with CONFIG_PATH.open() as f:
+            raw_overrides = json.load(f).get("hr_profiles", [])
     except Exception as exc:
-        log_warning(f"Warning: Failed to load HR profile overrides: {exc}")
+        log_warning(f"Warning: Failed to load HR profile overrides from {CONFIG_PATH}: {exc}")
         return []
 
     overrides = []

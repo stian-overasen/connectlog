@@ -7,9 +7,6 @@ oauth_tokens.txt
 # Cache files
 cache/*
 
-# Local HR profile overrides
-hr_profiles.json
-
 # Python
 __pycache__/
 *.py[cod]

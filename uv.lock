@@ -141,7 +141,7 @@ wheels = [
 [[package]]
 name = "connectlog"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "garminconnect" },
     { name = "keyring" },
@@ -158,9 +158,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "garminconnect" },
-    { name = "keyring" },
-    { name = "mcp" },
+    { name = "garminconnect", specifier = ">=0.2.38,<0.3" },
+    { name = "keyring", specifier = ">=25.7" },
+    { name = "mcp", specifier = ">=1.26,<2" },
 ]
 
 [package.metadata.requires-dev]

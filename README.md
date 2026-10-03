@@ -12,7 +12,46 @@ MCP server that fetches Garmin Connect health data (daily summaries and activiti
 - Date-range JSON caching keyed by start and end date
 - HR zone label support for Garmin and Olympiatoppen schemes
 
-## Setup
+## Quick start with uvx (no local clone)
+
+Requires [uv](https://docs.astral.sh/uv/) and a Garmin Connect account. uvx fetches Python 3.14 and dependencies automatically.
+
+1. Authenticate with Garmin (stores the session token in your OS keychain):
+
+```bash
+uvx --from git+https://github.com/stian-overasen/connectlog connectlog-setup
+```
+
+2. Add the server to your MCP client.
+
+Claude Code:
+
+```bash
+claude mcp add connectlog -- uvx --from git+https://github.com/stian-overasen/connectlog connectlog
+```
+
+Claude Desktop (`claude_desktop_config.json`) or any client using the `mcpServers` format:
+
+```json
+{
+  "mcpServers": {
+    "connectlog": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/stian-overasen/connectlog",
+        "connectlog"
+      ]
+    }
+  }
+}
+```
+
+Optionally add a [config file](#configuration).
+
+To pick up the latest version, run `uvx --refresh --from git+https://github.com/stian-overasen/connectlog connectlog` once, or add `--refresh` to the args. Pin a version with `git+https://github.com/stian-overasen/connectlog@<tag-or-commit>`.
+
+## Local development setup
 
 ### Prerequisites
 
@@ -43,9 +82,7 @@ uv run setup_oauth.py
 
 This stores your Garmin session token in your OS keychain.
 
-4. Optional: configure date-based HR profile overrides by copying [hr_profiles.example.json](hr_profiles.example.json) to `hr_profiles.json` in the project root. If the file is missing, default Garmin zones are used.
-
-## Running
+### Running
 
 Start the MCP server:
 
@@ -53,7 +90,13 @@ Start the MCP server:
 uv run app.py
 ```
 
-The process runs as an MCP server over stdio.
+The process runs as an MCP server over stdio. The repository's [.mcp.json](.mcp.json) runs it this way for Claude Code.
+
+## Configuration
+
+Optional configuration is read from `~/.connectlog.json` (see [connectlog.example.json](connectlog.example.json)). If the file is missing, defaults are used.
+
+- `hr_profiles`: date-based HR profile overrides (device, max HR and zone scheme `garmin` or `olympiatoppen`). Without it, default Garmin zones are used.
 
 ## MCP Tools
 
@@ -125,9 +168,10 @@ Activity fields:
 ```text
 connectlog/
 ├── app.py
+├── credentials.py
 ├── setup_oauth.py
 ├── pyproject.toml
-├── hr_profiles.example.json
+├── connectlog.example.json
 ├── bin/
 │   ├── format.sh
 │   └── lint.sh
@@ -136,8 +180,8 @@ connectlog/
 
 ## Troubleshooting
 
-- GARMIN session token not found in OS keychain: run uv run setup_oauth.py
-- Authentication expired: re-run uv run setup_oauth.py
+- GARMIN session token not found in OS keychain: run `uvx --from git+https://github.com/stian-overasen/connectlog connectlog-setup` (or `uv run setup_oauth.py` from a clone)
+- Authentication expired: re-run the setup command above
 - No data returned: verify Garmin credentials and available data for the requested date range
 
 To remove a stored token on macOS:
