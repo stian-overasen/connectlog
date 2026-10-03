@@ -5,6 +5,8 @@ MCP server that fetches Garmin Connect health data (daily summaries and activiti
 ## Features
 
 - Daily health summaries: resting HR, max HR, HRV, body battery min/max, steps, sleep duration, sleep score, and activity count
+- Stress and body battery flow per day: average/max stress, rest/low/medium/high stress percentages (of the full day, including activity time), body battery charged/drained and body battery at wake time
+  - Cached summaries from before these fields existed are refetched automatically
 - Activity details: type, duration, distance, time in heart-rate zones, and body-battery impact
 - MCP tools for AI clients over stdio
 - Date-range JSON caching keyed by start and end date

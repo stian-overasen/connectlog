@@ -84,6 +84,19 @@ OLYMPIATOPPEN_ZONE_RANGES = [
     {"label": "I-1", "min_percent": 55, "max_percent": 71},
 ]
 
+# Extra daily fields copied as-is from Garmin's daily stats payload (stress and body battery flow).
+STATS_EXTRA_FIELDS = (
+    "averageStressLevel",
+    "maxStressLevel",
+    "restStressPercentage",
+    "lowStressPercentage",
+    "mediumStressPercentage",
+    "highStressPercentage",
+    "bodyBatteryChargedValue",
+    "bodyBatteryDrainedValue",
+    "bodyBatteryAtWakeTime",
+)
+
 SUMMARY_FIELD_RENAMES = {
     "steps": "totalSteps",
     "hrv_overnight_avg": "hrvLastNightAvg",
@@ -351,6 +364,9 @@ def load_cached_summaries_map(start_date, end_date):
             if not (start_date <= date_value <= end_date):
                 continue
 
+            if not has_current_summary_fields(summary):
+                continue
+
             summary_by_date.setdefault(date_str, normalize_summary_field_names(summary))
 
     return summary_by_date
@@ -525,6 +541,11 @@ def normalize_summary_cache_payload(payload):
     return normalized_payload
 
 
+def has_current_summary_fields(summary):
+    """Return True if a cached summary already contains the stress fields (older caches do not)."""
+    return all(field in summary for field in STATS_EXTRA_FIELDS)
+
+
 def fetch_daily_summary(client, date_str):
     """Fetch daily health summary for a specific date."""
     summary = {
@@ -538,15 +559,18 @@ def fetch_daily_summary(client, date_str):
         "sleepDuration": None,
         "sleepScore": None,
         "numberOfActivities": 0,
+        **dict.fromkeys(STATS_EXTRA_FIELDS),
     }
 
     try:
-        # Get daily stats (resting HR, max HR, steps)
+        # Get daily stats (resting HR, max HR, steps, stress, body battery flow)
         stats = client.get_stats(date_str)
         if stats:
             summary["totalSteps"] = stats.get("totalSteps")
             summary["restingHeartRate"] = stats.get("restingHeartRate")
             summary["maxHeartRate"] = stats.get("maxHeartRate")
+            for field in STATS_EXTRA_FIELDS:
+                summary[field] = stats.get(field)
     except Exception as e:
         log_warning(f"  Warning: Failed to get stats for {date_str}: {e}")
 
@@ -719,7 +743,7 @@ def create_mcp_server():
         end_date_str = parsed_end.strftime("%Y-%m-%d")
 
         cached_data = load_cache("summary", start_date_str, end_date_str)
-        if cached_data:
+        if cached_data and all(has_current_summary_fields(summary) for summary in cached_data.get("summaries", [])):
             return cached_data
 
         all_dates = build_descending_date_strings(parsed_start, parsed_end)
