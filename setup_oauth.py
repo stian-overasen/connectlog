@@ -25,7 +25,7 @@ def setup_oauth():
 
     try:
         # Create Garmin client and login
-        client = Garmin(email, password)
+        client = Garmin(email, password, prompt_mfa=lambda: input("Enter MFA code (sent via SMS/email): ").strip())
         client.login()
 
         # Get OAuth session token
