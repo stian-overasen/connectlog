@@ -5,7 +5,7 @@ description = "MCP server to fetch Garmin Connect health data for ME/CFS PEM thr
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "garminconnect>=0.2.38,<0.3",
+    "garminconnect>=0.3.17,<0.4",
     "keyring>=25.7",
     "mcp>=1.26,<2",
 ]

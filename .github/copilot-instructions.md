@@ -183,6 +183,6 @@ When generating code for this project:
 ## Known Limitations
 
 - Garmin API rate limits may slow initial data fetch
-- OAuth token expires after ~1 year (re-run setup_oauth.py)
+- OAuth token is refreshed automatically and saved back to the keychain (re-run setup_oauth.py if it is rejected)
 - Some Garmin metrics may not be available for all users
 - Cache directory grows over time (no automatic cleanup)

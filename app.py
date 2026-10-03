@@ -11,9 +11,16 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from garminconnect import Garmin
+from garminconnect import Garmin, GarminConnectAuthenticationError
 
-from credentials import KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, GarminSessionStorageError, MissingGarminSessionError, load_garmin_session_token
+from credentials import (
+    KEYCHAIN_ACCOUNT,
+    KEYCHAIN_SERVICE,
+    GarminSessionStorageError,
+    MissingGarminSessionError,
+    load_garmin_session_token,
+    save_garmin_session_token,
+)
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -465,20 +472,26 @@ def get_garmin_client():
     try:
         garmin_session = load_garmin_session_token()
     except MissingGarminSessionError as exc:
-        raise Exception("GARMIN_SESSION not found in OS keychain. Run setup_oauth.py first.") from exc
+        raise Exception("GARMIN_SESSION not found in OS keychain. Run connectlog-setup first.") from exc
     except GarminSessionStorageError as exc:
         raise Exception(f"Failed to load GARMIN_SESSION from OS keychain: {exc}") from exc
 
     client = Garmin()
-    client.garth.loads(garmin_session)
+    try:
+        # login() accepts the token JSON inline: it restores the session,
+        # refreshes it if it is about to expire and loads the user profile.
+        client.login(garmin_session)
+    except GarminConnectAuthenticationError as exc:
+        raise Exception(f"Garmin session in OS keychain is invalid or expired ({exc}). Run connectlog-setup to log in again.") from exc
 
-    # garth.loads() restores tokens but skips login(), which is what normally
-    # populates display_name/full_name; fetch the profile directly instead,
-    # since per-user API paths 403 without a display_name.
-    profile = client.garth.profile
-    if isinstance(profile, dict):
-        client.display_name = profile.get("displayName")
-        client.full_name = profile.get("fullName")
+    # Refresh tokens rotate, and garminconnect only persists them to a file
+    # tokenstore, so write a refreshed session back to the keychain.
+    refreshed_session = client.client.dumps()
+    if refreshed_session != garmin_session:
+        try:
+            save_garmin_session_token(refreshed_session)
+        except GarminSessionStorageError as exc:
+            log_warning(f"Warning: Failed to save refreshed Garmin session to keychain: {exc}")
 
     return client
 
