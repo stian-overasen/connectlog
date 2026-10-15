@@ -7,3 +7,11 @@ updates:
       interval: "monthly"
     labels:
       - "dependencies"
+
+  # pre-commit hooks
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"

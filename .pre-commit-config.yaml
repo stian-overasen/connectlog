@@ -12,7 +12,7 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.9.26
+    rev: 0.13.1
     hooks:
       # Update the uv lockfile
       - id: uv-lock
@@ -21,13 +21,13 @@ repos:
         args: ["--locked", "--all-packages"]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.13
+    rev: v0.17.0
     hooks:
       - id: ruff-check
       - id: ruff-format
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.4.1
+    rev: v2.4.3
     hooks:
       - id: codespell
         additional_dependencies:
