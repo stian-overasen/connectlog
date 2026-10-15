@@ -14,7 +14,7 @@ MCP server that fetches Garmin Connect health data (daily summaries and activiti
 
 ## Quick start with uvx (no local clone)
 
-Requires [uv](https://docs.astral.sh/uv/) and a Garmin Connect account. uvx fetches Python 3.14 and dependencies automatically.
+Requires [uv](https://docs.astral.sh/uv/) and a Garmin Connect account. uvx fetches Python 3.15 and dependencies automatically.
 
 1. Authenticate with Garmin (stores the session token in your OS keychain):
 
@@ -55,7 +55,7 @@ To pick up the latest version, run `uvx --refresh --from git+https://github.com/
 
 ### Prerequisites
 
-- Python 3.14+
+- Python 3.15+
 - uv package manager
 - Garmin Connect account
 

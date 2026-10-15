@@ -6,7 +6,7 @@ This is an MCP server that fetches Garmin Connect health data for ME/CFS (Myalgi
 
 ## Technology Stack
 
-- **Language**: Python 3.14+
+- **Language**: Python 3.15+
 - **Package Manager**: uv (NOT pip)
 - **Server Protocol**: MCP (Model Context Protocol) over stdio
 - **API Client**: garminconnect library

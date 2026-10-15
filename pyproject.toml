@@ -3,7 +3,7 @@ name = "connectlog"
 version = "0.1.0"
 description = "MCP server to fetch Garmin Connect health data for ME/CFS PEM threshold research"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 dependencies = [
     "garminconnect>=0.3.17,<0.4",
     "keyring>=25.7",
@@ -34,7 +34,7 @@ required-version = ">=0.9.13"
 
 [tool.ruff]
 line-length = 160
-target-version = "py314"
+target-version = "py315"
 
 [tool.ruff.lint]
 select = [
