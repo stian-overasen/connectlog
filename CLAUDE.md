@@ -1,4 +1,4 @@
-# GitHub Copilot Instructions for Garmin Connect Log
+# CLAUDE.md
 
 ## Project Overview
 
@@ -11,7 +11,7 @@ This is an MCP server that fetches Garmin Connect health data for ME/CFS (Myalgi
 - **Server Protocol**: MCP (Model Context Protocol) over stdio
 - **API Client**: garminconnect library
 - **Cache Storage**: JSON files (local caching)
-- **Configuration**: none required; optional `hr_profiles.json` in project root for HR zone overrides
+- **Configuration**: none required; optional `~/.connectlog.json` for `hr_profiles` HR zone overrides (see `connectlog.example.json`)
 
 ## Code Style & Standards
 
@@ -43,7 +43,8 @@ connectlog/
 ├── app.py              # Main MCP server with Garmin fetch tools
 ├── setup_oauth.py      # OAuth authentication script
 ├── pyproject.toml      # uv project configuration
-├── hr_profiles.json    # Optional HR zone overrides (gitignored)
+├── credentials.py      # OS keychain token storage
+├── connectlog.example.json # Example ~/.connectlog.json
 ├── bin/
 │   ├── format.sh       # Code formatting script
 │   └── lint.sh         # Linting script
@@ -55,7 +56,7 @@ connectlog/
 ### Authentication
 
 - Uses Garmin Connect OAuth via `garminconnect` library
-- Session token stored in the OS keychain (valid ~1 year), via [credentials.py](../credentials.py)
+- Session token stored in the OS keychain (valid ~1 year), via [credentials.py](credentials.py)
 - Run `uv run setup_oauth.py` to generate token
 
 ### Cache Storage
@@ -72,6 +73,7 @@ Cache location is OS-specific and per-user:
 - date, restingHeartRate, maxHeartRate, hrvLastNightAvg
 - bodyBatteryMin, bodyBatteryMax
 - totalSteps, sleepDuration, sleepScore, numberOfActivities
+- stress and body battery flow fields from daily stats
 
 **activities-YYYY-MM-DD-to-YYYY-MM-DD.json:**
 
