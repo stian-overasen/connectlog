@@ -85,7 +85,7 @@ Cache location is OS-specific and per-user:
 
 - MCP tools take explicit date ranges (`start_date`, `end_date`) in YYYY-MM-DD
 - Check JSON cache for existing data before Garmin calls
-- Cache payloads carry `fetchedAt`; a day is only served from cache if fetched at least 12 hours after it ended (`CACHE_SETTLE_PERIOD`), otherwise it is refetched. Legacy files without `fetchedAt` use the file mtime
+- A day is only served from cache if fetched at least 12 hours after it ended (`CACHE_SETTLE_PERIOD`), otherwise it is refetched. Each summary carries its own `fetchedAt` (kept when reused across cache files); activities payloads carry `finalThrough`. Cache entries without these are ignored
 - If no cache, fetch all data from Garmin and save to JSON
 - Skip individual dates/activities on errors (partial data OK)
 
