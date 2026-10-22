@@ -125,6 +125,8 @@ Cache files:
 - summary-YYYY-MM-DD-to-YYYY-MM-DD.json
 - activities-YYYY-MM-DD-to-YYYY-MM-DD.json
 
+Days that were fetched before they were complete (less than 12 hours after the day ended) are refetched automatically, so today's steps and activities are never frozen at a mid-day value.
+
 To force refetch, delete matching files in your OS cache directory.
 
 Examples:

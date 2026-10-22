@@ -117,6 +117,10 @@ SUMMARY_FIELD_RENAMES = {
 
 CACHE_FILENAME_PATTERN = re.compile(r"^(summary|activities)-(\d{4}-\d{2}-\d{2})-to-(\d{4}-\d{2}-\d{2})\.json$")
 
+# A day's data is only treated as final (cacheable) when fetched at least this long after the day ended,
+# so that late watch syncs (steps, activities, body battery) are picked up.
+CACHE_SETTLE_PERIOD = timedelta(hours=12)
+
 
 def parse_date_or_none(date_str, field_name):
     """Parse a YYYY-MM-DD string to a date or return None."""
@@ -278,6 +282,28 @@ def list_cache_files(data_type):
     return cache_files
 
 
+def get_last_final_date(fetched_at):
+    """Return the last date whose data was complete when fetched at the given time."""
+    return (fetched_at - CACHE_SETTLE_PERIOD).date() - timedelta(days=1)
+
+
+def get_payload_last_final_date(payload):
+    """Return the last final date for a cache payload, or None if its fetch time is unknown."""
+    fetched_at_str = payload.get("fetchedAt") if isinstance(payload, dict) else None
+    if not isinstance(fetched_at_str, str):
+        return None
+
+    try:
+        return get_last_final_date(datetime.fromisoformat(fetched_at_str))
+    except ValueError:
+        return None
+
+
+def get_fetched_at_now():
+    """Return the current local time as an ISO string for cache payloads."""
+    return datetime.now().isoformat(timespec="seconds")
+
+
 def ranges_overlap(start_date_a, end_date_a, start_date_b, end_date_b):
     """Return True if two inclusive date ranges overlap."""
     return start_date_a <= end_date_b and start_date_b <= end_date_a
@@ -351,6 +377,10 @@ def load_cached_summaries_map(start_date, end_date):
         if not isinstance(payload, dict):
             continue
 
+        last_final_date = get_payload_last_final_date(payload)
+        if last_final_date is None:
+            continue
+
         summaries = payload.get("summaries")
         if not isinstance(summaries, list):
             continue
@@ -368,7 +398,7 @@ def load_cached_summaries_map(start_date, end_date):
             except ValueError:
                 continue
 
-            if not (start_date <= date_value <= end_date):
+            if not (start_date <= date_value <= end_date) or date_value > last_final_date:
                 continue
 
             if not has_current_summary_fields(summary):
@@ -402,13 +432,20 @@ def load_cached_activities(start_date, end_date):
         if not ranges_overlap(start_date, end_date, cache_info["start_date"], cache_info["end_date"]):
             continue
 
-        overlap_start = max(start_date, cache_info["start_date"])
-        overlap_end = min(end_date, cache_info["end_date"])
-        covered_ranges.append((overlap_start, overlap_end))
-
         payload = load_cache("activities", cache_info["start_date_str"], cache_info["end_date_str"])
         if not isinstance(payload, dict):
             continue
+
+        last_final_date = get_payload_last_final_date(payload)
+        if last_final_date is None:
+            continue
+
+        overlap_start = max(start_date, cache_info["start_date"])
+        overlap_end = min(end_date, cache_info["end_date"], last_final_date)
+        if overlap_start > overlap_end:
+            continue
+
+        covered_ranges.append((overlap_start, overlap_end))
 
         activities = payload.get("activities")
         if not isinstance(activities, list):
@@ -419,7 +456,7 @@ def load_cached_activities(start_date, end_date):
                 continue
 
             activity_date = get_activity_date(activity)
-            if activity_date is None or not (start_date <= activity_date <= end_date):
+            if activity_date is None or not (overlap_start <= activity_date <= overlap_end):
                 continue
 
             key = (
@@ -444,6 +481,11 @@ def load_cache(data_type, start_date, end_date):
         try:
             with cache_file.open() as f:
                 cached_data = json.load(f)
+
+            # Older caches lack fetchedAt; the file modification time is when they were fetched.
+            if isinstance(cached_data, dict) and "fetchedAt" not in cached_data:
+                cached_data["fetchedAt"] = datetime.fromtimestamp(cache_file.stat().st_mtime).isoformat(timespec="seconds")
+                save_cache(data_type, start_date, end_date, cached_data)
 
             if data_type == "summary":
                 normalized_data = normalize_summary_cache_payload(cached_data)
@@ -756,7 +798,13 @@ def create_mcp_server():
         end_date_str = parsed_end.strftime("%Y-%m-%d")
 
         cached_data = load_cache("summary", start_date_str, end_date_str)
-        if cached_data and all(has_current_summary_fields(summary) for summary in cached_data.get("summaries", [])):
+        last_final_date = get_payload_last_final_date(cached_data)
+        if (
+            cached_data
+            and last_final_date is not None
+            and parsed_end <= last_final_date
+            and all(has_current_summary_fields(summary) for summary in cached_data.get("summaries", []))
+        ):
             return cached_data
 
         all_dates = build_descending_date_strings(parsed_start, parsed_end)
@@ -811,7 +859,7 @@ def create_mcp_server():
         for summary in daily_summaries:
             summary["numberOfActivities"] = activity_counts.get(summary["date"], 0)
 
-        response_data = {"summaries": format_summaries_for_output(daily_summaries)}
+        response_data = {"fetchedAt": get_fetched_at_now(), "summaries": format_summaries_for_output(daily_summaries)}
         save_cache("summary", start_date_str, end_date_str, response_data)
         return response_data
 
@@ -832,7 +880,8 @@ def create_mcp_server():
         end_date_str = parsed_end.strftime("%Y-%m-%d")
 
         cached_data = load_cache("activities", start_date_str, end_date_str)
-        if cached_data:
+        last_final_date = get_payload_last_final_date(cached_data)
+        if cached_data and last_final_date is not None and parsed_end <= last_final_date:
             return cached_data
 
         cached_activities, covered_ranges = load_cached_activities(parsed_start, parsed_end)
@@ -874,6 +923,7 @@ def create_mcp_server():
             activities.append(activity)
 
         response_data = {
+            "fetchedAt": get_fetched_at_now(),
             "activities": activities,
             "hr_zone_percentages": {
                 "garmin": GARMIN_ZONE_RANGES,
