@@ -94,7 +94,7 @@ The process runs as an MCP server over stdio. The repository's [.mcp.json](.mcp.
 
 ## Configuration
 
-Optional configuration is read from `~/.connectlog.json` (see [connectlog.example.json](connectlog.example.json)). If the file is missing, defaults are used.
+Optional configuration is read from `$XDG_CONFIG_HOME/connectlog/config.json`, defaulting to `~/.config/connectlog/config.json` (Windows: `%APPDATA%\connectlog\config.json`). See [connectlog.example.json](connectlog.example.json). If the file is missing, defaults are used.
 
 - `hr_profiles`: date-based HR profile overrides (device, max HR and zone scheme `garmin` or `olympiatoppen`). Without it, default Garmin zones are used.
 

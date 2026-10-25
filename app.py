@@ -68,9 +68,19 @@ def get_global_cache_dir():
     return base_cache_dir / "connectlog"
 
 
+def get_config_path():
+    """Resolve the per-user config file path for connectlog."""
+    if os.name == "nt":
+        base_config_dir = Path(os.getenv("APPDATA", str(Path.home() / "AppData" / "Roaming")))
+        return base_config_dir / "connectlog" / "config.json"
+
+    base_config_dir = Path(os.getenv("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+    return base_config_dir / "connectlog" / "config.json"
+
+
 # Configuration
 CACHE_DIR = get_global_cache_dir()
-CONFIG_PATH = Path.home() / ".connectlog.json"
+CONFIG_PATH = get_config_path()
 
 # Ensure cache directory exists
 CACHE_DIR.mkdir(parents=True, exist_ok=True)

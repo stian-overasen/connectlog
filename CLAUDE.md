@@ -11,7 +11,7 @@ This is an MCP server that fetches Garmin Connect health data for ME/CFS (Myalgi
 - **Server Protocol**: MCP (Model Context Protocol) over stdio
 - **API Client**: garminconnect library
 - **Cache Storage**: JSON files (local caching)
-- **Configuration**: none required; optional `~/.connectlog.json` for `hr_profiles` HR zone overrides (see `connectlog.example.json`)
+- **Configuration**: none required; optional `~/.config/connectlog/config.json` for `hr_profiles` HR zone overrides (see `connectlog.example.json`)
 
 ## Code Style & Standards
 
@@ -44,7 +44,7 @@ connectlog/
 ├── setup_oauth.py      # OAuth authentication script
 ├── pyproject.toml      # uv project configuration
 ├── credentials.py      # OS keychain token storage
-├── connectlog.example.json # Example ~/.connectlog.json
+├── connectlog.example.json # Example ~/.config/connectlog/config.json
 ├── bin/
 │   ├── format.sh       # Code formatting script
 │   └── lint.sh         # Linting script
